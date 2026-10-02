@@ -5,6 +5,8 @@ import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { createStore } from './store.js';
+import { startLocalBlogScheduler } from './local-blog-job.js';
+import { seedTestBlogPosts } from './test-posts.js';
 import { resolveCmsDataPath } from './data-path.js';
 import {
   DEFAULT_FEATURES,
@@ -92,6 +94,14 @@ export default function createCmsRoutes({
   const resolvedDataPath = resolveCmsDataPath({ dataPath, siteKey });
   const router = express.Router();
   const store = createStore(resolvedDataPath);
+  seedTestBlogPosts(store, resolvedDataPath);
+  startLocalBlogScheduler({
+    store,
+    dataPath: resolvedDataPath,
+    hubUrl,
+    siteKey,
+    env: process.env,
+  });
   const emailTemplates = createEmailTemplateStore(resolvedDataPath);
 
   // Step 3 site seed (cms.site.json): lists are created once (ids preserved so

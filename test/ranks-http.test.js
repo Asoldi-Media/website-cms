@@ -87,8 +87,9 @@ test('writer can publish blog posts but cannot manage products; employee cannot 
     assert.equal(productRes.status, 403);
 
     const publicPosts = await fetch(`${base}/posts`).then((r) => r.json());
-    assert.equal(publicPosts.length, 1);
-    assert.equal(publicPosts[0].authorName, 'writer1');
+    const writerPost = publicPosts.find((post) => post.authorName === 'writer1');
+    assert.equal(publicPosts.length, 4);
+    assert.equal(writerPost.title, 'From writer');
 
     const emp = await login(base, 'emp1', 'emppass');
     const del = await fetch(`${base}/admin/users/${employee.id}`, { method: 'DELETE', headers: emp });
