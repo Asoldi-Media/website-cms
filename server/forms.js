@@ -251,5 +251,6 @@ try {
   var q = new URLSearchParams(location.search); var okId = q.get('cms-form')==='ok' ? q.get('form') : null;
   if (okId){ var el = document.querySelector('[data-cms-form="'+okId.replace(/"/g,'')+'"]'); if (el){ showSuccess(el, el.getAttribute('data-cms-success') || CFG.success[okId] || ''); el.scrollIntoView({block:'center'}); } }
 } catch(err) {}
+try { var s=document.createElement('script'); s.src='/api/cms/analytics/collect.js'; s.defer=true; document.head.appendChild(s); } catch(e) {}
 })();`;
 }

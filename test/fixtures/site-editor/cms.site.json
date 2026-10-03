@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "site": { "name": "Fixture Cafe", "language": "nb", "domain": "localhost" },
+  "lists": [],
+  "forms": [],
+  "pages": [
+    {
+      "route": "/",
+      "title": "Hjem",
+      "kind": "home",
+      "inNav": true,
+      "slots": { "hasMarkers": true, "text": [{ "key": "hero-1/heading/1" }], "media": [{ "key": "hero-1/image/1" }], "sections": [{ "key": "hero-1", "section": "hero" }], "cmsSlots": [] }
+    },
+    {
+      "route": "/about",
+      "title": "Om oss",
+      "kind": "about",
+      "inNav": true,
+      "slots": { "hasMarkers": true, "text": [{ "key": "about-1/heading/1" }], "media": [], "sections": [{ "key": "about-1", "section": "about" }], "cmsSlots": [] }
+    },
+    {
+      "route": "/product",
+      "title": "Produkt",
+      "kind": "product-page",
+      "isTemplate": true,
+      "inNav": false,
+      "slots": { "hasMarkers": true, "text": [], "media": [], "sections": [], "cmsSlots": [{ "slot": "product.name" }, { "slot": "product.price" }] }
+    }
+  ],
+  "catalog": {
+    "catalogType": "menu",
+    "categories": [{ "id": "cat_1", "name": "Bakeri" }],
+    "products": [{ "id": "dish-1", "name": "Kanelbolle", "price": 49, "productType": "menu" }]
+  },
+  "content": {
+    "cmsSlotAttr": "data-cms-slot",
+    "injectOrder": ["forms-runtime", "asoldi-hydrator", "content-runtime"],
+    "asoldiHydratorSkipsCmsSlots": true
+  }
+}

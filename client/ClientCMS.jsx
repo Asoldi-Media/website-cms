@@ -3,13 +3,14 @@
  * Server must mount createCmsRoutes at /api/cms (see README).
  */
 import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
-import { Users, LogOut, LayoutDashboard, BarChart3, ShoppingBag, Newspaper, Share2, Mail, Layers, Image as ImageIcon } from 'lucide-react';
+import { Users, LogOut, LayoutDashboard, BarChart3, ShoppingBag, Newspaper, Share2, Mail, Layers, Image as ImageIcon, Pencil } from 'lucide-react';
 import { Helmet } from 'react-helmet-async';
 import { EcommercePanel } from './EcommercePanel.jsx';
 import { BlogPanel } from './BlogPanel.jsx';
 import { AnalyticsPanel } from './AnalyticsPanel.jsx';
 import { GeneralPanel } from './GeneralPanel.jsx';
 import { MediaPanel } from './MediaPanel.jsx';
+import { SiteEditorPanel } from './SiteEditorPanel.jsx';
 
 const EmailMarketingPanel = lazy(() => import('./EmailMarketingPanel.jsx').then((m) => ({ default: m.EmailMarketingPanel })));
 
@@ -40,6 +41,7 @@ function firstEnabledTab(features, rank = 'admin') {
     if (rank === 'writer') return tab === 'blog';
     return true;
   };
+  if (can('website')) return 'website';
   if (features.users !== false && can('users')) return 'users';
   if (features.ecommerce && can('ecommerce')) return 'ecommerce';
   if (features.emailMarketing && can('email')) return 'email';
@@ -54,7 +56,7 @@ export function ClientCMS() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
-  const [tab, setTab] = useState('users');
+  const [tab, setTab] = useState('website');
   const [features, setFeatures] = useState(DEFAULT_FEATURES);
   const [catalogType, setCatalogType] = useState('normal');
   const [siteName, setSiteName] = useState('');
@@ -305,6 +307,15 @@ export function ClientCMS() {
             <p className="text-xs text-gray-400 mt-1">Client CMS{rank && rank !== 'admin' ? ` · ${rank}` : ''}</p>
           </div>
           <nav className="flex-1 p-2">
+            {isStaffManager && (
+              <button
+                type="button"
+                onClick={() => setTab('website')}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-medium transition-colors ${tab === 'website' ? 'bg-[#FF5B00] text-white' : 'text-gray-300 hover:bg-white/10'}`}
+              >
+                <Pencil size={18} /> Website
+              </button>
+            )}
             {features.users !== false && isStaffManager && (
               <button
                 type="button"
@@ -388,7 +399,15 @@ export function ClientCMS() {
             </button>
           </div>
         </aside>
-        <main className="flex-1 ml-56 p-8">
+        <main className={`flex-1 ml-56 ${tab === 'website' ? 'p-0 overflow-hidden' : 'p-8'}`}>
+          {tab === 'website' && isStaffManager && (
+            <SiteEditorPanel
+              authHeaders={authHeaders}
+              actor={actor}
+              catalogType={catalogType}
+              onOpenTab={setTab}
+            />
+          )}
           {tab === 'analytics' && features.analytics && isStaffManager && (
             <AnalyticsPanel authHeaders={authHeaders} loading={loading} setLoading={setLoading} />
           )}
@@ -407,6 +426,20 @@ export function ClientCMS() {
           )}
           {tab === 'ecommerce' && features.ecommerce && isStaffManager && (
             <EcommercePanel catalogType={catalogType} authHeaders={authHeaders} loading={loading} setLoading={setLoading} />
+          )}
+          {tab === 'ecommerce' && !features.ecommerce && isStaffManager && (
+            <div className="max-w-4xl">
+              <h1 className="text-2xl font-bold text-white mb-4">Products</h1>
+              <p className="text-gray-400">Ecommerce is not enabled for this site. Turn it on in the hub, or edit marketing pages under Website.</p>
+              <button type="button" onClick={() => setTab('website')} className="mt-4 px-3 py-2 rounded-lg bg-[#FF5B00] text-white text-sm">Back to Website</button>
+            </div>
+          )}
+          {tab === 'blog' && !features.blog && canBlog && (
+            <div className="max-w-4xl">
+              <h1 className="text-2xl font-bold text-white mb-4">Blog</h1>
+              <p className="text-gray-400">Blog is not enabled for this site.</p>
+              <button type="button" onClick={() => setTab('website')} className="mt-4 px-3 py-2 rounded-lg bg-[#FF5B00] text-white text-sm">Back to Website</button>
+            </div>
           )}
           {tab === 'email' && features.emailMarketing && isStaffManager && (
             <Suspense fallback={<p className="text-gray-400">Laster e-posteditor…</p>}>

@@ -1,6 +1,6 @@
 # Context for Cursor / developers
 
-This repo is **@damianhch/client-cms** (v1.5.0): the **client-facing CMS package** that gets installed on each client website (e.g. mongsushi.no, or any site built by Asoldi). It is **not** the super-admin; the super-admin lives in the main Asoldi website repo.
+This repo is **@damianhch/client-cms** (v1.8.0): the **client-facing CMS package** that gets installed on each client website (e.g. mongsushi.no, or any site built by Asoldi). It is **not** the super-admin; the super-admin lives in the main Asoldi website repo.
 
 ---
 
@@ -18,7 +18,7 @@ This repo is **@damianhch/client-cms** (v1.5.0): the **client-facing CMS package
 
 | What | Where |
 |------|--------|
-| **This package** | npm: `@damianhch/client-cms`. GitHub: https://github.com/Damianhch/website-cms |
+| **This package** | npm: `@damianhch/client-cms`. GitHub: https://github.com/Asoldi-Media/website-cms |
 | **Hub (super-admin)** | Asoldi website repo. URL: that site’s `/superadmin` (e.g. asoldi.com/superadmin). You add client sites there, set website plan, feature flags, and ecommerce catalog type. |
 | **Client data** | On each client’s server: users, products, categories, admin credentials. This package writes to `dataPath/cms/`. |
 | **Feature flags + catalog type** | Stored in the hub; this package only reads them via `GET /api/hub/site-config?site_key=...`. |

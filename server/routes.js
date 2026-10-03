@@ -20,10 +20,20 @@ import { publicLead } from './leads.js';
 import { isPostPublic, publicPost } from './blog.js';
 import { canDeleteUsers, normalizeRank } from './ranks.js';
 import { publicAnalyticsSnippet, verifyAnalyticsDns } from './analytics.js';
+import { createAnalyticsEventStore } from './analytics-events.js';
+import { analyticsTrackerScript, rangeFromPreset as analyticsRangeFromPreset, summarizeTrafficEvents } from './analytics-tracker.js';
+import { summarizeCta, summarizeEcommerceFunnel, summarizeShopifyCommerce, normalizeAnalyticsPath } from './analytics-insights.js';
+import { setPublicAnalyticsEnabled } from './analytics-flag.js';
 import { publicPayments } from './payments.js';
 import { createEmailTemplateStore, mergeFieldsMeta, shouldSeedAsoldiPresets } from './email-templates.js';
 import { loadSiteSeed } from './site-seed.js';
 import { createMediaLibrary, isAllowedMediaName } from './media.js';
+import { createSiteEditsStore } from './site-edits.js';
+import { siteHydratorScript } from './site-hydrator.js';
+import { siteEditorRuntimeScript } from './site-editor-runtime.js';
+import { contentRuntimeScript } from './content-runtime.js';
+import { extractSlotMapFromHtml } from './slot-map.js';
+import { resolvePublicHtml } from './html-tracker.js';
 import {
   applyFieldMap,
   errorMessageFor,
@@ -59,7 +69,9 @@ function fallbackConfig() {
     domain,
     ecommerceCatalogType: devEcommerce ? resolveCatalogType(process.env.CMS_DEV_CATALOG_TYPE || 'menu') : null,
     websitePlan: null,
+    analyticsLevel: 'none',
     desiredCmsVersion: null,
+    analyticsGoals: { mainCtaText: '', mainCtaUrl: '', ctaPath: '' },
     packageVersion: PACKAGE_VERSION,
   };
 }
@@ -71,6 +83,7 @@ function applyDevFlags(features) {
   if (process.env.CMS_DEV_BLOG === '1') next.blog = true;
   if (process.env.CMS_DEV_ANALYTICS === '1') next.analytics = true;
   if (process.env.CMS_DEV_GENERAL === '1') next.general = true;
+  setPublicAnalyticsEnabled(next.analytics === true);
   return next;
 }
 
@@ -79,6 +92,7 @@ function withPackageVersion(data) {
     ...fallbackConfig(),
     ...data,
     features: applyDevFlags(normalizeFeatures(data?.features || DEFAULT_FEATURES)),
+    analyticsLevel: data?.analyticsLevel || (data?.features?.ecommerce ? 'advanced' : data?.features?.analytics ? 'basic' : 'none'),
     packageVersion: PACKAGE_VERSION,
   };
 }
@@ -89,9 +103,11 @@ export default function createCmsRoutes({
   dataPath,
   siteSeed: siteSeedInput,
   siteSeedPath,
+  publicPath,
   adminSecret = process.env.CMS_ADMIN_SECRET || process.env.ADMIN_SECRET || 'change-me',
 } = {}) {
   const resolvedDataPath = resolveCmsDataPath({ dataPath, siteKey });
+  const resolvedPublicPath = publicPath || join(process.cwd(), 'public');
   const router = express.Router();
   const store = createStore(resolvedDataPath);
   seedTestBlogPosts(store, resolvedDataPath);
@@ -102,12 +118,15 @@ export default function createCmsRoutes({
     siteKey,
     env: process.env,
   });
+  const analyticsEvents = createAnalyticsEventStore(resolvedDataPath);
   const emailTemplates = createEmailTemplateStore(resolvedDataPath);
+  const siteEdits = createSiteEditsStore(resolvedDataPath);
 
   // Step 3 site seed (cms.site.json): lists are created once (ids preserved so
   // bindings resolve), forms + pages are read-only structure.
   const siteSeed = loadSiteSeed({ siteSeed: siteSeedInput, siteSeedPath });
   const seedListIdMap = store.seedLists(siteSeed.lists);
+  if (siteSeed.catalog) store.seedCatalog(siteSeed.catalog);
 
   function resolveListForForm(form) {
     const wanted = String(form?.destination?.listId || '');
@@ -271,6 +290,36 @@ export default function createCmsRoutes({
     }
   }
 
+  async function fetchHubAnalytics(query = {}) {
+    if (!siteKey || !hubUrl) return null;
+    try {
+      const params = new URLSearchParams({ site_key: siteKey, ...query });
+      const r = await fetch(`${hubUrl.replace(/\/$/, '')}/api/hub/analytics?${params}`);
+      if (!r.ok) return null;
+      return await r.json();
+    } catch {
+      return null;
+    }
+  }
+
+  function forwardCommerceToHub(payload) {
+    if (!siteKey || !hubUrl || !payload) return;
+    fetch(`${hubUrl.replace(/\/$/, '')}/api/hub/analytics/commerce`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ site_key: siteKey, ...payload }),
+    }).catch(() => {});
+  }
+
+  function forwardTrafficToHub(events) {
+    if (!siteKey || !hubUrl || !events?.length) return;
+    fetch(`${hubUrl.replace(/\/$/, '')}/api/hub/analytics/collect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ site_key: siteKey, events }),
+    }).catch(() => {});
+  }
+
   function sendHeartbeat(req, config) {
     if (!siteKey || !hubUrl) return;
     const base = hubUrl.replace(/\/$/, '');
@@ -304,15 +353,16 @@ export default function createCmsRoutes({
 
   router.get('/catalog', async (req, res) => {
     const config = await fetchHubConfig();
-    if (!config.features.ecommerce) {
+    const products = store.getAllProducts();
+    if (!config.features.ecommerce && !products.length) {
       return res.status(404).json({ message: 'Ecommerce is not enabled' });
     }
-    const catalogType = resolveCatalogType(config.ecommerceCatalogType);
+    const catalogType = resolveCatalogType(config.ecommerceCatalogType || siteSeed.catalog?.catalogType);
     res.json({
       catalogType,
       name: config.name,
       categories: store.getAllCategories().map(publicCategory),
-      products: store.getAllProducts().map(publicProduct),
+      products: products.map(publicProduct),
     });
   });
 
@@ -607,6 +657,55 @@ export default function createCmsRoutes({
     res.send(formsRuntimeScript({ messages: { success, error: errorMessageFor(siteSeed.site.language) } }));
   });
 
+  router.get('/site-hydrator.js', (_req, res) => {
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(siteHydratorScript());
+  });
+
+  router.get('/content-runtime.js', (_req, res) => {
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.send(contentRuntimeScript());
+  });
+
+  router.get('/site-editor-runtime.js', (_req, res) => {
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(siteEditorRuntimeScript());
+  });
+
+  router.get('/site-edits/public', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ patches: siteEdits.readPublished().patches });
+  });
+
+  router.get('/site-edits', adminAuth, (_req, res) => {
+    res.json(siteEdits.snapshot());
+  });
+
+  router.put('/site-edits/draft', adminAuth, (req, res) => {
+    const next = siteEdits.writeDraft(req.body?.patches || []);
+    res.json({ draft: next, ...siteEdits.snapshot() });
+  });
+
+  router.post('/site-edits/publish', adminAuth, (req, res) => {
+    if (req.actor?.rank === 'writer') return res.status(403).json({ message: 'Writers cannot publish site edits.' });
+    const published = siteEdits.publish();
+    res.json({ published, ...siteEdits.snapshot() });
+  });
+
+  router.get('/site-edits/scan', adminAuth, (req, res) => {
+    const route = String(req.query.route || '/');
+    const file = resolvePublicHtml(resolvedPublicPath, route);
+    if (!file) return res.json({ route, slots: extractSlotMapFromHtml('') });
+    try {
+      return res.json({ route, slots: extractSlotMapFromHtml(readFileSync(file, 'utf8')) });
+    } catch {
+      return res.json({ route, slots: extractSlotMapFromHtml('') });
+    }
+  });
+
   // Public: the site's own forms post here (JSON via runtime, urlencoded without JS).
   router.post('/forms/:id/submit', express.urlencoded({ extended: false, limit: '200kb' }), async (req, res) => {
     const form = siteSeed.forms.find((f) => f.id === String(req.params.id || ''));
@@ -723,10 +822,10 @@ export default function createCmsRoutes({
 
   router.get('/posts', async (req, res) => {
     const config = await fetchHubConfig();
-    if (!config.features.blog) {
+    const posts = store.getAllPosts().filter((post) => isPostPublic(post)).map(publicPost);
+    if (!config.features.blog && !posts.length) {
       return res.status(404).json({ message: 'Blog is not enabled' });
     }
-    const posts = store.getAllPosts().filter((post) => isPostPublic(post)).map(publicPost);
     res.json(posts);
   });
 
@@ -771,6 +870,7 @@ export default function createCmsRoutes({
     });
     res.json({
       ...settings,
+      analyticsLevel: config.analyticsLevel || (config.features?.ecommerce ? 'advanced' : config.features?.analytics ? 'basic' : 'none'),
       snippet: publicAnalyticsSnippet(settings),
       dnsRecord: `${settings.dnsTxtName}.${settings.domain || '<domain>'} TXT ${settings.dnsTxtValue}`,
     });
@@ -795,6 +895,79 @@ export default function createCmsRoutes({
   router.get('/analytics/public', async (_req, res) => {
     const settings = store.getAnalytics();
     res.json(publicAnalyticsSnippet(settings));
+  });
+
+  router.get('/analytics/collect.js', async (req, res) => {
+    const config = req.cmsConfig || (await fetchHubConfig());
+    const ctaPath = normalizeAnalyticsPath(config?.analyticsGoals?.ctaPath || config?.analyticsGoals?.mainCtaUrl || '');
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=120');
+    res.send(analyticsTrackerScript({ ctaPath }));
+  });
+
+  router.post('/analytics/collect', (req, res) => {
+    const incoming = Array.isArray(req.body?.events) ? req.body.events : Array.isArray(req.body) ? req.body : [];
+    const events = incoming.slice(0, 40);
+    const accepted = analyticsEvents.append(events);
+    forwardTrafficToHub(events);
+    res.json({ ok: true, accepted });
+  });
+
+  router.get('/analytics/overview', adminAuth, attachCmsConfig, async (req, res) => {
+    const config = req.cmsConfig || (await fetchHubConfig());
+    const level = config.analyticsLevel || (config.features?.ecommerce ? 'advanced' : config.features?.analytics ? 'basic' : 'none');
+    if (level === 'none' && !config.features?.analytics) {
+      return res.status(403).json({ message: 'Analytics is not enabled for this plan.' });
+    }
+    const window = analyticsRangeFromPreset(req.query.range || '30d', req.query.from, req.query.to);
+    const events = analyticsEvents.read(window.from.getTime(), window.to.getTime());
+    const traffic = summarizeTrafficEvents(events, window);
+    const hub = await fetchHubAnalytics({
+      range: String(req.query.range || '30d'),
+      from: String(req.query.from || ''),
+      to: String(req.query.to || ''),
+      refresh: String(req.query.refresh || ''),
+    });
+    const goals = hub?.goals || config.analyticsGoals || {};
+    const cta = summarizeCta(events, goals.ctaPath || goals.mainCtaUrl, {
+      from: window.from,
+      to: window.to,
+      visits: traffic.visits,
+    });
+    let ecommerce = null;
+    if (level === 'advanced' || config.features?.ecommerce) {
+      const orders = filterOrders(store.getAllOrders(), {
+        range: 'custom',
+        from: window.from.toISOString(),
+        to: window.to.toISOString(),
+      });
+      const shop = summarizeShopifyCommerce(orders, traffic.visits);
+      const funnel = summarizeEcommerceFunnel(events, orders, window);
+      ecommerce = {
+        ...shop,
+        funnel: funnel.stages,
+        abandonment: funnel.abandonment,
+      };
+      forwardCommerceToHub({
+        ...shop,
+        funnel: funnel.stages,
+        abandonment: funnel.abandonment,
+        range: { preset: window.preset, from: window.from.toISOString(), to: window.to.toISOString() },
+      });
+    }
+    res.json({
+      access: { level, ecommerce: Boolean(ecommerce) },
+      range: { preset: window.preset, from: window.from.toISOString(), to: window.to.toISOString() },
+      traffic: hub?.traffic?.visits ? hub.traffic : traffic,
+      localTraffic: traffic,
+      cta,
+      goals: { ...goals, label: goals.mainCtaText || goals.label || '' },
+      maps: hub?.maps || null,
+      gbp: hub?.gbp || null,
+      subject: hub?.subject || null,
+      ecommerce,
+      settings: store.getAnalytics({ domain: config.domain || '' }),
+    });
   });
 
   router.get('/payments', adminAuth, (_req, res) => {

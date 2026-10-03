@@ -146,3 +146,19 @@ test('normalizeProduct fills defaults for incomplete rows', () => {
   assert.equal(product.sortOrder, 0);
   assert.ok(product.createdAt);
 });
+
+test('seedCatalog writes once and refuses a second write', () => {
+  const { dir, store } = makeTempStore();
+  const first = store.seedCatalog({
+    categories: [{ id: 'cat_1', name: 'Food' }],
+    products: [{ id: 'prod_1', name: 'Soup', price: 49, productType: 'menu' }],
+  });
+  assert.equal(first.seeded, true);
+  assert.equal(store.getAllProducts().length, 1);
+  const second = store.seedCatalog({
+    products: [{ id: 'prod_2', name: 'Cake', price: 10 }],
+  });
+  assert.equal(second.seeded, false);
+  assert.equal(store.getAllProducts()[0].name, 'Soup');
+  rmSync(dir, { recursive: true, force: true });
+});

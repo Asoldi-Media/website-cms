@@ -2,11 +2,14 @@
 // and shipped in the client repo next to server.js. Read-only site structure:
 //   lists   email lists the developer created before deploy (seeded once)
 //   forms   frontend form bindings: destination (list/inbox) + field map
-//   pages   page map with kinds (home/about/blog-post/product-page/…)
-// The CMS layers live data (leads, submissions) on top; this file never changes
-// at runtime.
+//   pages   page map with kinds (home/about/blog-post/product-page/…) plus asoldi slot map
+//   content hydrator contract (cms-slot attr, inject order) — visual editor + catalog fill
+// The CMS layers live data (leads, submissions) on top; this file never changes at runtime.
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { CONTENT_SEED_CONTRACT } from './cms-slot-contract.js';
+import { emptySlotMap, normalizeSlotMap } from './slot-map.js';
+import { resolveCatalogType } from './catalog.js';
 
 export const FORM_PURPOSES = ['newsletter', 'contact', 'booking', 'order', 'search', 'login', 'other'];
 export const DESTINATION_TYPES = ['list', 'inbox'];
@@ -80,12 +83,25 @@ export function normalizeSeedPage(raw) {
     navLabel: text(raw.navLabel),
     kind,
     isTemplate: raw.isTemplate === true || kind === 'blog-post' || kind === 'product-page',
-    inNav: raw.inNav !== false,
+    inNav: kind === 'blog-post' || kind === 'product-page' ? raw.inNav === true : raw.inNav !== false,
+    slots: normalizeSlotMap(raw.slots || emptySlotMap()),
+  };
+}
+
+function normalizeSeedCatalog(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const products = Array.isArray(raw.products) ? raw.products : [];
+  const categories = Array.isArray(raw.categories) ? raw.categories : [];
+  if (!products.length) return null;
+  return {
+    catalogType: resolveCatalogType(raw.catalogType),
+    categories,
+    products,
   };
 }
 
 export function normalizeSiteSeed(raw) {
-  const src = raw && typeof raw === 'object' ? raw : {};
+  const src = raw && typeof raw === "object" ? raw : {};
   return {
     version: Number(src.version) || 1,
     generatedAt: text(src.generatedAt),
@@ -98,6 +114,14 @@ export function normalizeSiteSeed(raw) {
     lists: (Array.isArray(src.lists) ? src.lists : []).map(normalizeSeedList).filter(Boolean),
     forms: (Array.isArray(src.forms) ? src.forms : []).map(normalizeSeedForm).filter(Boolean),
     pages: (Array.isArray(src.pages) ? src.pages : []).map(normalizeSeedPage).filter(Boolean),
+    catalog: normalizeSeedCatalog(src.catalog),
+    content: {
+      cmsSlotAttr: text(src.content?.cmsSlotAttr) || CONTENT_SEED_CONTRACT.cmsSlotAttr,
+      injectOrder: Array.isArray(src.content?.injectOrder) && src.content.injectOrder.length
+        ? src.content.injectOrder.map(text).filter(Boolean)
+        : [...CONTENT_SEED_CONTRACT.injectOrder],
+      asoldiHydratorSkipsCmsSlots: src.content?.asoldiHydratorSkipsCmsSlots !== false,
+    },
   };
 }
 

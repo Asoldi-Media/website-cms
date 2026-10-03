@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="nb">
+<head>
+  <meta charset="utf-8" />
+  <title>Produkt — Editor fixture</title>
+  <style>
+    body { margin: 0; font-family: Georgia, serif; }
+    header, footer { background: #111; color: #fff; padding: 1rem 1.5rem; }
+    header a { color: #fff; }
+    main { padding: 3rem 1.5rem; }
+  </style>
+</head>
+<body data-asoldi-route="/product" data-asoldi-page-role="other">
+  <header data-asoldi-section="header" data-asoldi-key="header-1">
+    <a data-asoldi-text="header-1/link/1" href="/">Fixture Cafe</a>
+  </header>
+  <main>
+    <h1 data-asoldi-text="product-1/heading/1" data-cms-slot="product.name">Kanelbolle</h1>
+    <p data-asoldi-text="product-1/price/1" data-cms-slot="product.price" data-cms-product-id="dish-1">49 kr</p>
+    <p data-asoldi-text="product-1/body/1" data-cms-slot="product.description">Varm fra ovnen.</p>
+  </main>
+  <footer data-asoldi-section="footer" data-asoldi-key="footer-1">
+    <p data-asoldi-text="footer-1/body/1">© Fixture Cafe</p>
+  </footer>
+</body>
+</html>

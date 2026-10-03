@@ -1,6 +1,6 @@
 {
   "name": "@damianhch/client-cms",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "Client CMS for Asoldi client sites: users with ranks, ecommerce, email lists, blog, analytics, payments, media library. Mount at /api/cms, serve /admin from admin-dist or ClientCMS.",
   "type": "module",
   "main": "server/routes.js",
@@ -49,7 +49,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Damianhch/website-cms.git"
+    "url": "https://github.com/Asoldi-Media/website-cms.git"
   },
   "keywords": [
     "cms",

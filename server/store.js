@@ -447,6 +447,19 @@ export function createStore(dataPath) {
       }
       return idMap;
     },
+    /**
+     * First boot only. Live products.json is the source of truth after that —
+     * re-publish must never overwrite client-entered catalog rows.
+     */
+    seedCatalog({ products = [], categories = [] } = {}) {
+      if (readProducts().length) return { seeded: false, reason: 'already-has-products' };
+      const cats = (Array.isArray(categories) ? categories : []).map((row) => normalizeCategory(row)).filter((row) => row && row.id);
+      const prods = (Array.isArray(products) ? products : []).map((row) => normalizeProduct(row)).filter((row) => row && row.id && String(row.name || '').trim());
+      if (!prods.length) return { seeded: false, reason: 'empty' };
+      if (cats.length) writeCategories(cats);
+      writeProducts(prods);
+      return { seeded: true, products: prods.length, categories: cats.length };
+    },
     getAllSubmissions() {
       const rows = readJson(SUBMISSIONS_PATH, []);
       return (Array.isArray(rows) ? rows : [])

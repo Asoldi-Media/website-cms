@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="nb">
+<head>
+  <meta charset="utf-8" />
+  <title>Om oss — Editor fixture</title>
+  <style>
+    body { margin: 0; font-family: Georgia, serif; color: #1a1a1a; }
+    header, footer { background: #111; color: #fff; padding: 1rem 1.5rem; display: flex; gap: 1.25rem; align-items: center; }
+    header a, footer a { color: #fff; }
+    main { padding: 3rem 1.5rem; max-width: 40rem; }
+  </style>
+</head>
+<body data-asoldi-route="/about" data-asoldi-page-role="about">
+  <header data-asoldi-section="header" data-asoldi-key="header-1">
+    <a data-asoldi-text="header-1/link/1" href="/">Fixture Cafe</a>
+    <a data-asoldi-text="header-1/link/2" href="/about">Om oss</a>
+  </header>
+  <main data-asoldi-section="about" data-asoldi-key="about-1">
+    <h1 data-asoldi-text="about-1/heading/1">Om kafeen</h1>
+    <p data-asoldi-text="about-1/body/1">En side til, så editoren kan bytte side.</p>
+    <p>Umerket setning som ikke skal lagres.</p>
+  </main>
+  <footer data-asoldi-section="footer" data-asoldi-key="footer-1">
+    <p data-asoldi-text="footer-1/body/1">© Fixture Cafe</p>
+  </footer>
+</body>
+</html>

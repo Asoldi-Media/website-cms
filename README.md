@@ -2,13 +2,13 @@
 
 Client CMS for Asoldi client sites: **users**, **typed ecommerce** (menu / tiers / normal), and hub-driven feature flags (users, ecommerce, blog, social sync, analytics). Install in any client project; mount at `/api/cms`, show UI at `/admin`.
 
-Package version: **1.5.0**.
+Package version: **1.8.0**.
 
 ---
 
 ## What you need
 
-- **Hub (super-admin):** Runs in the [Asoldi website](https://github.com/Damianhch/asoldi-website) repo at **that domain/superadmin**. There you add client sites, pick a website plan, turn features on/off, and choose an ecommerce catalog type.
+- **Hub (super-admin):** Runs in the [Asoldi website](https://github.com/Damianhch/Asoldi-website) repo at **that domain/superadmin**. There you add client sites, pick a website plan, turn features on/off, and choose an ecommerce catalog type.
 - **This package:** Install in each **client** project so that **domain.com/admin** gives the client their CMS.
 
 ---
@@ -173,7 +173,7 @@ Admin UI: **General → Pages / Forms & inbox**; Email marketing lists show whic
 
 - **Blog** (`blog` flag): text + image blocks, author is the signed-in user, draft / scheduled / published. Public `GET /api/cms/posts`.
 - **General** (`general` flag): CMS user ranks — employee (no delete users), writer (blog only), member (no modules). Superadmin has a **Client admin user** page (name, email, password, avatar, service checkboxes). A new password hashes on the hub and syncs to the client CMS on the next config fetch.
-- **Analytics** (`analytics` flag): Asoldi-owned GA4. No client Google login. Verify with DNS TXT `_asoldi-analytics`. Env: `GA4_MEASUREMENT_ID`, `GA4_PROPERTY_ID`. Public snippet: `GET /api/cms/analytics/public`.
+- **Analytics** (`analytics` flag): Tier 2 basic dashboard (visits, bounce, Google Maps ranking). Tier 3 adds ecommerce metrics. First-party tracker at `/api/cms/analytics/collect.js`. Maps ranking is fetched from the Asoldi hub (DataForSEO Google Maps SERP, every 14 days). GA4 DNS TXT remains optional.
 
 That endpoint returns **404** when ecommerce is off. Product data stays on the client server (`{dataPath}/cms/products.json`). Existing flat `{name, price, description, imageUrl}` rows are migrated in place.
 
