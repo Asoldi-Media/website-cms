@@ -145,9 +145,9 @@ export function SiteEditorInspector({
           </Field>
         ) : null}
 
-        {!lock.locked && kind === 'media' ? (
+        {!lock.locked && (kind === 'media' || selected.mediaKey) ? (
           <div className="space-y-3">
-            <p className="text-xs font-medium text-neutral-600">Bilde</p>
+            <p className="text-xs font-medium text-neutral-600">{kind === 'media' ? 'Bilde' : 'Bakgrunnsbilde'}</p>
             <div className="aspect-video rounded-md border border-neutral-200 bg-neutral-50 overflow-hidden flex items-center justify-center">
               {selected.mediaUrl ? (
                 <img src={selected.mediaUrl} alt="" className="w-full h-full object-cover" />
@@ -165,7 +165,7 @@ export function SiteEditorInspector({
           </div>
         ) : null}
 
-        {!lock.locked && kind === 'section' ? (
+        {!lock.locked && (kind === 'section' || selected.mediaIsSection) ? (
           <div className="space-y-2">
             <p className="text-xs font-medium text-neutral-600">Seksjon</p>
             <div className="grid grid-cols-2 gap-2">

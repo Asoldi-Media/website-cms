@@ -231,7 +231,8 @@ export function applyPatchesToDocument(document, patches, { skipCmsSlots = true,
       if (!el || (skipCmsSlots && shouldSkipElement(el))) continue;
       setElementTextPreserveChrome(el, patch.value);
     } else if (patch.type === 'media') {
-      const el = document.querySelector(`[${MEDIA_ATTR}="${cssEscape(patch.key)}"]`);
+      const el = document.querySelector(`[${MEDIA_ATTR}="${cssEscape(patch.key)}"]`)
+        || (patch.sectionKey ? document.querySelector(`[${KEY_ATTR}="${cssEscape(patch.sectionKey)}"]`) : null);
       if (!el || (skipCmsSlots && shouldSkipElement(el))) continue;
       const url = String(patch.value ?? '');
       if (el.hasAttribute('src') || /^(IMG|VIDEO|SOURCE)$/i.test(el.tagName)) el.setAttribute('src', url);

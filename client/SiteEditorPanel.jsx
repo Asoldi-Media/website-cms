@@ -361,10 +361,12 @@ export function SiteEditorPanel({ authHeaders, actor, onOpenTab, catalogType = '
     });
     if (selected && patch.key && (patch.type === 'text' || patch.type === 'href' || patch.type === 'media')) {
       setSelected((current) => {
-        if (!current || current.key !== patch.key) return current;
-        if (patch.type === 'text') return { ...current, value: patch.value };
-        if (patch.type === 'href') return { ...current, href: patch.href || patch.value || '' };
-        if (patch.type === 'media') return { ...current, mediaUrl: patch.value };
+        if (!current) return current;
+        if (patch.type === 'text' && current.key === patch.key) return { ...current, value: patch.value };
+        if (patch.type === 'href' && current.key === patch.key) return { ...current, href: patch.href || patch.value || '' };
+        if (patch.type === 'media' && (current.mediaKey === patch.key || current.key === patch.key)) {
+          return { ...current, mediaUrl: patch.value, mediaKey: current.mediaKey || patch.key };
+        }
         return current;
       });
     }
@@ -532,8 +534,9 @@ export function SiteEditorPanel({ authHeaders, actor, onOpenTab, catalogType = '
             );
           }}
           onPickMedia={() => {
-            if (!selected?.key) return;
-            setMediaTarget({ key: selected.key, route: selected.route || page.route });
+            const key = selected?.mediaKey || selected?.key;
+            if (!key) return;
+            setMediaTarget({ key, route: selected.route || page.route });
             setMediaOpen(true);
           }}
           onSectionAction={handleSectionAction}

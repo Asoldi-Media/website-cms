@@ -100,6 +100,9 @@ test('editor runtime opens a side panel instead of contenteditable', () => {
   assert.doesNotMatch(src, /setAttribute\(['"]contenteditable['"]/);
   assert.match(src, /asoldi-editor-select/);
   assert.match(src, /asoldi-ed-selected/);
+  assert.match(src, /a\[href\],area\[href\]/);
+  assert.match(src, /backgroundImage/);
+  assert.match(src, /Ikke redigerbar/);
 });
 
 test('inject is idempotent', () => {
