@@ -4,6 +4,7 @@ import { extractSlotMapFromHtml } from '../server/slot-map.js';
 import { applyPatchesToHtml, injectSiteRuntimes } from '../server/site-hydrator.js';
 import { normalizePatchList } from '../server/site-edits.js';
 import { preparePublicHtml } from '../server/html-tracker.js';
+import { siteEditorRuntimeScript } from '../server/site-editor-runtime.js';
 
 const HOME = `<!doctype html><html><body data-asoldi-route="/" data-asoldi-page-role="home">
 <header data-asoldi-section="header" data-asoldi-key="header-1"><a data-asoldi-text="header-1/link/1" href="/">Logo</a></header>
@@ -92,6 +93,13 @@ test('public inject adds hydrator, editor inject skips hydrator', () => {
   const edit = preparePublicHtml(HOME, { editor: true, analytics: false });
   assert.match(edit, /site-editor-runtime\.js/);
   assert.doesNotMatch(edit, /site-hydrator\.js/);
+});
+
+test('editor runtime opens a side panel instead of contenteditable', () => {
+  const src = siteEditorRuntimeScript();
+  assert.doesNotMatch(src, /setAttribute\(['"]contenteditable['"]/);
+  assert.match(src, /asoldi-editor-select/);
+  assert.match(src, /asoldi-ed-selected/);
 });
 
 test('inject is idempotent', () => {

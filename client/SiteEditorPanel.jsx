@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Monitor, Smartphone, Tablet, Undo2, Redo2, Globe } from 'lucide-react';
 import { MediaPicker } from './MediaPanel.jsx';
+import { SiteEditorInspector } from './SiteEditorInspector.jsx';
 
 const API = '/api/cms';
 const DEVICES = [
@@ -129,6 +130,7 @@ export function SiteEditorPanel({ authHeaders, actor, onOpenTab, catalogType = '
   const [historyIndex, setHistoryIndex] = useState(0);
   const [status, setStatus] = useState('');
   const [hasMarkers, setHasMarkers] = useState(true);
+  const [selected, setSelected] = useState(null);
   const [selectedSection, setSelectedSection] = useState('');
   const [mediaOpen, setMediaOpen] = useState(false);
   const [mediaTarget, setMediaTarget] = useState(null);
@@ -223,6 +225,11 @@ export function SiteEditorPanel({ authHeaders, actor, onOpenTab, catalogType = '
         setMediaTarget({ key: data.key, route: data.route || page.route });
         setMediaOpen(true);
       }
+      if (data.type === 'asoldi-editor-select') {
+        setSelected(data.selection || null);
+        setSelectedSection(data.selection?.sectionKey || '');
+        setUnmarkedTip(false);
+      }
       if (data.type === 'asoldi-editor-select-section') setSelectedSection(data.key || '');
       if (data.type === 'asoldi-editor-unmarked') {
         setUnmarkedTip(true);
@@ -236,6 +243,7 @@ export function SiteEditorPanel({ authHeaders, actor, onOpenTab, catalogType = '
           pushHistory(next);
           return next;
         });
+        setSelected(null);
         setIframeNonce((n) => n + 1);
       }
       if (data.type === 'asoldi-editor-product-put' && data.productId) {
@@ -332,6 +340,7 @@ export function SiteEditorPanel({ authHeaders, actor, onOpenTab, catalogType = '
     const i = historyIndex - 1;
     setHistoryIndex(i);
     setDraft(history[i] || []);
+    setSelected(null);
     setIframeNonce((n) => n + 1);
   }
 
@@ -340,7 +349,46 @@ export function SiteEditorPanel({ authHeaders, actor, onOpenTab, catalogType = '
     const i = historyIndex + 1;
     setHistoryIndex(i);
     setDraft(history[i] || []);
+    setSelected(null);
     setIframeNonce((n) => n + 1);
+  }
+
+  function applyLocalPatch(patch, { history = true } = {}) {
+    setDraft((current) => {
+      const next = upsertPatch(current, patch);
+      if (history) pushHistory(next);
+      return next;
+    });
+    if (selected && patch.key && (patch.type === 'text' || patch.type === 'href' || patch.type === 'media')) {
+      setSelected((current) => {
+        if (!current || current.key !== patch.key) return current;
+        if (patch.type === 'text') return { ...current, value: patch.value };
+        if (patch.type === 'href') return { ...current, href: patch.href || patch.value || '' };
+        if (patch.type === 'media') return { ...current, mediaUrl: patch.value };
+        return current;
+      });
+    }
+  }
+
+  function clearSelection() {
+    setSelected(null);
+    setSelectedSection('');
+    postToIframe({ type: 'asoldi-editor-clear-select' });
+  }
+
+  function handleSectionAction(action) {
+    const sectionKey = selected?.sectionKey || selectedSection;
+    if (!sectionKey) return;
+    if (action === 'hide') applyLocalPatch({ type: 'hide', route: page.route, key: sectionKey, hidden: true });
+    if (action === 'show') applyLocalPatch({ type: 'hide', route: page.route, key: sectionKey, hidden: false, value: false });
+    if (action === 'remove') {
+      applyLocalPatch({ type: 'remove', route: page.route, key: sectionKey });
+      clearSelection();
+      setIframeNonce((n) => n + 1);
+    }
+    if (action === 'duplicate' || action === 'up' || action === 'down') {
+      postToIframe({ type: 'asoldi-editor-section-action', action, key: sectionKey, route: page.route });
+    }
   }
 
   function insertBlock(block) {
@@ -360,23 +408,25 @@ export function SiteEditorPanel({ authHeaders, actor, onOpenTab, catalogType = '
       pushHistory(next);
       return next;
     });
+    setSelected(null);
     setIframeNonce((n) => n + 1);
   }
 
   const markerMissing = pages.length > 0 && page.slots && page.slots.hasMarkers === false && !hasMarkers;
 
   return (
-    <div className="h-[100dvh] max-h-[100dvh] flex flex-col bg-[#121212] text-white overflow-hidden">
-      <header className="min-h-14 shrink-0 border-b border-white/10 px-3 py-2 flex items-center gap-2 flex-wrap">
+    <div className="h-[100dvh] max-h-[100dvh] flex flex-col bg-neutral-50 text-neutral-900 overflow-hidden">
+      <header className="min-h-14 shrink-0 border-b border-neutral-200 bg-white px-3 py-2 flex items-center gap-2 flex-wrap">
         <Globe size={18} className="text-[#FF5B00]" />
         <select
           value={route}
           onChange={(e) => {
             setRoute(e.target.value);
+            setSelected(null);
             setSelectedSection('');
             setIframeNonce((n) => n + 1);
           }}
-          className="bg-[#1f1f1f] border border-white/10 rounded-lg px-2 py-1.5 text-sm max-w-[180px]"
+          className="bg-white border border-neutral-200 rounded-md px-2 py-1.5 text-sm max-w-[180px] text-neutral-900"
         >
           {(pages.length ? pages : [{ route: '/', title: 'Hjem' }]).map((p) => (
             <option key={p.route} value={p.route}>
@@ -384,7 +434,7 @@ export function SiteEditorPanel({ authHeaders, actor, onOpenTab, catalogType = '
             </option>
           ))}
         </select>
-        <div className="flex items-center gap-1 ml-2">
+        <div className="flex items-center gap-1 ml-1">
           {DEVICES.map((d) => {
             const Icon = d.icon;
             return (
@@ -392,7 +442,7 @@ export function SiteEditorPanel({ authHeaders, actor, onOpenTab, catalogType = '
                 key={d.id}
                 type="button"
                 onClick={() => setDevice(d.id)}
-                className={`px-2 py-1.5 rounded-lg text-xs flex items-center gap-1 ${device === d.id ? 'bg-[#FF5B00]' : 'hover:bg-white/10 text-gray-300'}`}
+                className={`px-2 py-1.5 rounded-md text-xs flex items-center gap-1 ${device === d.id ? 'bg-[#FF5B00] text-white' : 'text-neutral-600 hover:bg-neutral-100'}`}
                 title={d.label}
               >
                 <Icon size={16} />
@@ -401,52 +451,60 @@ export function SiteEditorPanel({ authHeaders, actor, onOpenTab, catalogType = '
             );
           })}
         </div>
-        <button type="button" onClick={undo} className="p-2 rounded-lg hover:bg-white/10 text-gray-300" title="Angre">
+        <button type="button" onClick={undo} className="p-2 rounded-md text-neutral-600 hover:bg-neutral-100" title="Angre">
           <Undo2 size={16} />
         </button>
-        <button type="button" onClick={redo} className="p-2 rounded-lg hover:bg-white/10 text-gray-300" title="Gjør om">
+        <button type="button" onClick={redo} className="p-2 rounded-md text-neutral-600 hover:bg-neutral-100" title="Gjør om">
           <Redo2 size={16} />
         </button>
-        <span className="text-xs text-gray-400 ml-2">{status || (unmarkedTip ? 'Dette feltet kan ikke redigeres' : '')}</span>
+        <span className={`text-xs px-2 py-1 rounded-md ${dirty ? 'bg-amber-50 text-amber-800' : 'bg-neutral-100 text-neutral-500'}`}>
+          {dirty ? 'Utkast' : 'Publisert'}
+        </span>
+        <span className="text-xs text-neutral-500">{status || (unmarkedTip ? 'Dette feltet kan ikke redigeres' : '')}</span>
         <div className="flex items-center gap-2 ml-auto">
-          <button type="button" onClick={saveDraft} disabled={saving} className="px-3 py-1.5 rounded-lg text-sm bg-white/10 hover:bg-white/15">
+          <button
+            type="button"
+            onClick={saveDraft}
+            disabled={saving}
+            className="px-3 py-1.5 rounded-md text-sm border border-neutral-200 bg-white text-neutral-800 hover:bg-neutral-50 disabled:opacity-40"
+          >
             Lagre utkast
           </button>
           <button
             type="button"
             onClick={publish}
             disabled={saving || !canPublish}
-            className="px-3 py-1.5 rounded-lg text-sm bg-[#FF5B00] disabled:opacity-40"
+            className="px-3 py-1.5 rounded-md text-sm bg-[#FF5B00] text-white hover:bg-[#e55200] disabled:opacity-40"
           >
             Publiser{unpublishedCount ? ` (${unpublishedCount})` : ''}
           </button>
         </div>
       </header>
       {markerMissing && (
-        <div className="px-4 py-2 text-sm bg-amber-500/15 text-amber-100 border-b border-amber-500/30">
+        <div className="px-4 py-2 text-sm bg-amber-50 text-amber-900 border-b border-amber-200">
           Dette nettstedet mangler redigeringsmerker. Publiser på nytt fra Website Creator.
         </div>
       )}
       <div className="flex flex-1 min-h-0">
-        <aside className="w-52 shrink-0 border-r border-white/10 p-3 overflow-y-auto">
-          <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Blokker</p>
-          <p className="text-[11px] text-gray-500 mb-3">Klikk en seksjon på siden, deretter en blokk.</p>
+        <aside className="w-52 shrink-0 border-r border-neutral-200 bg-white p-3 overflow-y-auto">
+          <p className="text-xs uppercase tracking-wide text-neutral-500 mb-2">Blokker</p>
+          <p className="text-[11px] text-neutral-500 mb-3">Klikk en seksjon på siden, deretter en blokk.</p>
           <div className="space-y-1.5">
             {BLOCKS.map((block) => (
               <button
                 key={block.id}
                 type="button"
                 onClick={() => insertBlock(block)}
-                className="w-full text-left px-3 py-2 rounded-lg bg-[#1f1f1f] hover:bg-white/10 text-sm"
+                className="w-full text-left px-3 py-2 rounded-md border border-neutral-200 bg-white hover:bg-neutral-50 text-sm"
               >
                 {block.label}
               </button>
             ))}
           </div>
         </aside>
-        <div className="flex-1 bg-[#0b0b0b] flex justify-center overflow-auto p-3">
+        <div className="flex-1 bg-neutral-100 flex justify-center overflow-auto p-3">
           <div
-            className="bg-white h-full shadow-2xl overflow-hidden"
+            className="bg-white h-full border border-neutral-200 overflow-hidden"
             style={{ width: width ? `${width}px` : '100%', maxWidth: '100%' }}
           >
             <iframe
@@ -459,6 +517,37 @@ export function SiteEditorPanel({ authHeaders, actor, onOpenTab, catalogType = '
             />
           </div>
         </div>
+        <SiteEditorInspector
+          selected={selected}
+          onClose={clearSelection}
+          onTextChange={(value, { commit }) => {
+            if (!selected?.key) return;
+            applyLocalPatch({ type: 'text', route: selected.route || page.route, key: selected.key, value }, { history: !!commit });
+          }}
+          onHrefChange={(nextHref, { commit }) => {
+            if (!selected?.key) return;
+            applyLocalPatch(
+              { type: 'href', route: selected.route || page.route, key: selected.key, href: nextHref, value: nextHref },
+              { history: !!commit }
+            );
+          }}
+          onPickMedia={() => {
+            if (!selected?.key) return;
+            setMediaTarget({ key: selected.key, route: selected.route || page.route });
+            setMediaOpen(true);
+          }}
+          onSectionAction={handleSectionAction}
+          onOpenTab={onOpenTab}
+          onProductPriceSave={(productId, value) => {
+            fetch(`${API}/products/${productId}`, {
+              method: 'PUT',
+              headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+              body: JSON.stringify({ price: Number(String(value || '0').replace(',', '.')) }),
+            }).then((res) => {
+              setStatus(res.ok ? 'Pris lagret i produkter' : 'Kunne ikke lagre produkt');
+            });
+          }}
+        />
       </div>
       <MediaPicker
         authHeaders={authHeaders}
@@ -468,11 +557,7 @@ export function SiteEditorPanel({ authHeaders, actor, onOpenTab, catalogType = '
         onClose={() => setMediaOpen(false)}
         onPick={(item) => {
           if (!mediaTarget || !item?.url) return;
-          setDraft((current) => {
-            const next = upsertPatch(current, { type: 'media', route: mediaTarget.route, key: mediaTarget.key, value: item.url });
-            pushHistory(next);
-            return next;
-          });
+          applyLocalPatch({ type: 'media', route: mediaTarget.route, key: mediaTarget.key, value: item.url });
           postToIframe({ type: 'asoldi-editor-set-media', key: mediaTarget.key, url: item.url });
           setMediaOpen(false);
         }}
