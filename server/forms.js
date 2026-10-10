@@ -1,170 +1,162 @@
-// Frontend form → CMS. Pure helpers + the browser runtime the site pages load.
-//
-// A bound <form> (or input cluster) carries `data-cms-form="<bindingId>"` and
-// posts to `/api/cms/forms/<bindingId>/submit`. The seed's field map says which
-// form field feeds which lead/inbox key; unmapped fields land in `extra`, so no
-// submitted data is ever lost. Works without JS (urlencoded POST → redirect) and
-// upgrades to fetch + inline success message with `forms-runtime.js`.
-
+/**
+ * Bound site forms (`data-cms-form`) posted to `/api/cms/forms/:id/submit`.
+ * The seed field map fills lead or inbox keys; unmapped fields stay in `extra`.
+ * Works without JS (urlencoded POST, then redirect) and with `forms-runtime.js`.
+ */
 const HONEYPOT_FIELDS = ['_gotcha', '_honey', 'website_url_hp'];
 const INTERNAL_FIELDS = new Set(['_cms_return', 'site_key', ...HONEYPOT_FIELDS]);
-
 function text(value = '') {
-  if (Array.isArray(value)) return value.map((v) => text(v)).filter(Boolean).join(', ');
-  return String(value ?? '').replace(/\s+/g, ' ').trim();
+    if (Array.isArray(value))
+        return value.map((v) => text(v)).filter(Boolean).join(', ');
+    return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
-
+/** True when a honeypot field was filled. */
 export function looksLikeBot(body = {}) {
-  return HONEYPOT_FIELDS.some((key) => text(body?.[key]).length > 0);
+    return HONEYPOT_FIELDS.some((key) => text(body?.[key]).length > 0);
 }
-
 const TRUTHY = new Set(['on', 'true', '1', 'yes', 'ja', 'checked']);
-
-/**
- * Apply a binding's field map to a submitted body.
- * @returns {{ mapped: Record<string,string>, extra: Record<string,string>, skipped: string[] }}
- */
+/** Map a submitted body through the binding. Unmapped values go to `extra`. */
 export function applyFieldMap(body = {}, form = {}) {
-  const fieldMap = form?.fieldMap || {};
-  const knownKeys = new Set((form?.fields || []).map((f) => f.key));
-  const nameToKey = new Map((form?.fields || []).map((f) => [f.name || f.key, f.key]));
-  const mapped = {};
-  const extra = {};
-  const skipped = [];
-  for (const [rawName, rawValue] of Object.entries(body || {})) {
-    const name = text(rawName);
-    if (!name || INTERNAL_FIELDS.has(name)) continue;
-    const key = knownKeys.has(name) ? name : nameToKey.get(name) || name;
-    const target = fieldMap[key] || fieldMap[name] || 'extra';
-    const value = text(rawValue);
-    if (target === 'skip') {
-      skipped.push(key);
-      continue;
+    const fieldMap = form?.fieldMap || {};
+    const knownKeys = new Set((form?.fields || []).map((f) => f.key));
+    const nameToKey = new Map((form?.fields || []).map((f) => [f.name || f.key, f.key]));
+    const mapped = {};
+    const extra = {};
+    const skipped = [];
+    for (const [rawName, rawValue] of Object.entries(body || {})) {
+        const name = text(rawName);
+        if (!name || INTERNAL_FIELDS.has(name))
+            continue;
+        const key = String(knownKeys.has(name) ? name : nameToKey.get(name) || name);
+        const target = fieldMap[key] || fieldMap[name] || 'extra';
+        const value = text(rawValue);
+        if (target === 'skip') {
+            skipped.push(key);
+            continue;
+        }
+        if (target === 'extra' || !target) {
+            if (value)
+                extra[key] = value.slice(0, 4000);
+            continue;
+        }
+        if (target === 'marketingAccept') {
+            mapped.marketingAccept = TRUTHY.has(value.toLowerCase()) || (value !== '' && value !== 'false' && value !== '0');
+            continue;
+        }
+        if (mapped[target]) {
+            /** Two fields mapped to one key: keep both, joined. */
+            mapped[target] = `${mapped[target]} ${value}`.trim();
+        }
+        else {
+            mapped[target] = value;
+        }
     }
-    if (target === 'extra' || !target) {
-      if (value) extra[key] = value.slice(0, 4000);
-      continue;
+    if (!mapped.name && (mapped.firstName || mapped.lastName)) {
+        mapped.name = [mapped.firstName, mapped.lastName].filter(Boolean).join(' ');
     }
-    if (target === 'marketingAccept') {
-      mapped.marketingAccept = TRUTHY.has(value.toLowerCase()) || (value !== '' && value !== 'false' && value !== '0');
-      continue;
-    }
-    if (mapped[target]) {
-      // Two fields → same key: keep both, joined.
-      mapped[target] = `${mapped[target]} ${value}`.trim();
-    } else {
-      mapped[target] = value;
-    }
-  }
-  if (!mapped.name && (mapped.firstName || mapped.lastName)) {
-    mapped.name = [mapped.firstName, mapped.lastName].filter(Boolean).join(' ');
-  }
-  return { mapped, extra, skipped };
+    return { mapped, extra, skipped };
 }
-
+/** One inbox row. Returns null when the input is not an object. */
 export function normalizeSubmission(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  const createdAt = raw.createdAt || new Date().toISOString();
-  return {
-    id: String(raw.id || ''),
-    formId: text(raw.formId),
-    formLabel: text(raw.formLabel),
-    purpose: text(raw.purpose),
-    page: text(raw.page),
-    name: text(raw.name),
-    email: text(raw.email).toLowerCase(),
-    sms: text(raw.sms),
-    subject: text(raw.subject),
-    message: String(raw.message ?? '').trim().slice(0, 20000),
-    company: text(raw.company),
-    extra: raw.extra && typeof raw.extra === 'object' ? raw.extra : {},
-    read: raw.read === true,
-    forwarded: raw.forwarded === true,
-    createdAt,
-  };
+    if (!raw || typeof raw !== 'object')
+        return null;
+    const createdAt = raw.createdAt || new Date().toISOString();
+    return {
+        id: String(raw.id || ''),
+        formId: text(raw.formId),
+        formLabel: text(raw.formLabel),
+        purpose: text(raw.purpose),
+        page: text(raw.page),
+        name: text(raw.name),
+        email: text(raw.email).toLowerCase(),
+        sms: text(raw.sms),
+        subject: text(raw.subject),
+        message: String(raw.message ?? '').trim().slice(0, 20000),
+        company: text(raw.company),
+        extra: raw.extra && typeof raw.extra === 'object' ? raw.extra : {},
+        read: raw.read === true,
+        forwarded: raw.forwarded === true,
+        createdAt,
+    };
 }
-
+/** Inbox fields the admin table shows. */
 export function publicSubmission(row) {
-  if (!row) return null;
-  return { ...row };
+    if (!row)
+        return null;
+    return { ...row };
 }
-
 /** Where to send the visitor after a no-JS submit. Stays on this site. */
 export function safeReturnPath(value = '', fallback = '/') {
-  const raw = text(value);
-  if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return fallback;
-  return raw.replace(/[\r\n]/g, '');
+    const raw = text(value);
+    if (!raw || !raw.startsWith('/') || raw.startsWith('//'))
+        return fallback;
+    return raw.replace(/[\r\n]/g, '');
 }
-
+/** True when the form post should answer JSON instead of redirecting. */
 export function wantsJson(req) {
-  const accept = String(req.get?.('accept') || req.headers?.accept || '');
-  if (/application\/json/i.test(accept)) return true;
-  if (String(req.get?.('x-requested-with') || '').toLowerCase() === 'fetch') return true;
-  return req.is?.('application/json') === 'application/json' || req.is?.('json') === 'json';
+    const accept = String(req.get?.('accept') || req.headers?.accept || '');
+    if (/application\/json/i.test(accept))
+        return true;
+    if (String(req.get?.('x-requested-with') || '').toLowerCase() === 'fetch')
+        return true;
+    return req.is?.('application/json') === 'application/json' || req.is?.('json') === 'json';
 }
-
 const DEFAULT_SUCCESS = {
-  en: 'Thank you! We have received your message.',
-  nb: 'Takk! Vi har mottatt meldingen din.',
-  no: 'Takk! Vi har mottatt meldingen din.',
-  nn: 'Takk! Vi har motteke meldinga di.',
-  sv: 'Tack! Vi har tagit emot ditt meddelande.',
-  da: 'Tak! Vi har modtaget din besked.',
-  de: 'Vielen Dank! Wir haben Ihre Nachricht erhalten.',
-  fr: 'Merci ! Nous avons bien reçu votre message.',
-  es: '¡Gracias! Hemos recibido tu mensaje.',
-  it: 'Grazie! Abbiamo ricevuto il tuo messaggio.',
-  nl: 'Bedankt! We hebben je bericht ontvangen.',
+    en: 'Thank you! We have received your message.',
+    nb: 'Takk! Vi har mottatt meldingen din.',
+    no: 'Takk! Vi har mottatt meldingen din.',
+    nn: 'Takk! Vi har motteke meldinga di.',
+    sv: 'Tack! Vi har tagit emot ditt meddelande.',
+    da: 'Tak! Vi har modtaget din besked.',
+    de: 'Vielen Dank! Wir haben Ihre Nachricht erhalten.',
+    fr: 'Merci ! Nous avons bien reçu votre message.',
+    es: '¡Gracias! Hemos recibido tu mensaje.',
+    it: 'Grazie! Abbiamo ricevuto il tuo messaggio.',
+    nl: 'Bedankt! We hebben je bericht ontvangen.',
 };
 const DEFAULT_SUCCESS_LIST = {
-  en: 'Thank you! You are now subscribed.',
-  nb: 'Takk! Du er nå påmeldt.',
-  no: 'Takk! Du er nå påmeldt.',
-  nn: 'Takk! Du er no påmeld.',
-  sv: 'Tack! Du är nu anmäld.',
-  da: 'Tak! Du er nu tilmeldt.',
-  de: 'Vielen Dank! Sie sind jetzt angemeldet.',
-  fr: 'Merci ! Vous êtes maintenant inscrit(e).',
-  es: '¡Gracias! Ya estás suscrito.',
-  it: 'Grazie! Ora sei iscritto.',
-  nl: 'Bedankt! Je bent nu ingeschreven.',
+    en: 'Thank you! You are now subscribed.',
+    nb: 'Takk! Du er nå påmeldt.',
+    no: 'Takk! Du er nå påmeldt.',
+    nn: 'Takk! Du er no påmeld.',
+    sv: 'Tack! Du är nu anmäld.',
+    da: 'Tak! Du er nu tilmeldt.',
+    de: 'Vielen Dank! Sie sind jetzt angemeldet.',
+    fr: 'Merci ! Vous êtes maintenant inscrit(e).',
+    es: '¡Gracias! Ya estás suscrito.',
+    it: 'Grazie! Ora sei iscritto.',
+    nl: 'Bedankt! Je bent nu ingeschreven.',
 };
 const DEFAULT_ERROR = {
-  en: 'Something went wrong. Please try again.',
-  nb: 'Noe gikk galt. Prøv igjen.',
-  no: 'Noe gikk galt. Prøv igjen.',
-  sv: 'Något gick fel. Försök igen.',
-  da: 'Noget gik galt. Prøv igen.',
-  de: 'Etwas ist schiefgelaufen. Bitte erneut versuchen.',
-  fr: 'Une erreur est survenue. Veuillez réessayer.',
-  es: 'Algo salió mal. Inténtalo de nuevo.',
+    en: 'Something went wrong. Please try again.',
+    nb: 'Noe gikk galt. Prøv igjen.',
+    no: 'Noe gikk galt. Prøv igjen.',
+    sv: 'Något gick fel. Försök igen.',
+    da: 'Noget gik galt. Prøv igen.',
+    de: 'Etwas ist schiefgelaufen. Bitte erneut versuchen.',
+    fr: 'Une erreur est survenue. Veuillez réessayer.',
+    es: 'Algo salió mal. Inténtalo de nuevo.',
 };
-
+/** Success copy for a binding, or the built-in line for its language. */
 export function successMessageFor(form, language = '') {
-  if (form?.successMessage) return form.successMessage;
-  const lang = String(language || 'en').toLowerCase().split(/[-_]/)[0];
-  const table = form?.destination?.type === 'list' ? DEFAULT_SUCCESS_LIST : DEFAULT_SUCCESS;
-  return table[lang] || table.en;
+    if (form?.successMessage)
+        return form.successMessage;
+    const lang = String(language || 'en').toLowerCase().split(/[-_]/)[0];
+    const table = form?.destination?.type === 'list' ? DEFAULT_SUCCESS_LIST : DEFAULT_SUCCESS;
+    return table[lang] || table.en;
 }
-
+/** Error copy for a language, else English. */
 export function errorMessageFor(language = '') {
-  const lang = String(language || 'en').toLowerCase().split(/[-_]/)[0];
-  return DEFAULT_ERROR[lang] || DEFAULT_ERROR.en;
+    const lang = String(language || 'en').toLowerCase().split(/[-_]/)[0];
+    return DEFAULT_ERROR[lang] || DEFAULT_ERROR.en;
 }
-
-/**
- * Browser runtime served at /api/cms/forms-runtime.js. Framework-agnostic:
- * finds `[data-cms-form]`, intercepts submit (capture phase so template scripts
- * such as Webflow's form handler never get to post elsewhere), serializes every
- * input/textarea/select inside, POSTs JSON, then swaps in a success message.
- * Also handles `[data-cms-synthetic]` containers (inputs + button, no <form>).
- */
+/** Browser runtime at `/api/cms/forms-runtime.js`. Capture-phase submit, then JSON POST. */
 export function formsRuntimeScript({ messages = {} } = {}) {
-  const config = JSON.stringify({
-    success: messages.success || {},
-    error: messages.error || DEFAULT_ERROR.en,
-  });
-  return `(function(){
+    const config = JSON.stringify({
+        success: messages.success || {},
+        error: messages.error || DEFAULT_ERROR.en,
+    });
+    return `(function(){
 if (window.__cmsFormsRuntime) return; window.__cmsFormsRuntime = true;
 var CFG = ${config};
 function fieldsIn(root){ return root.querySelectorAll('input,textarea,select'); }
@@ -188,7 +180,7 @@ function invalid(root){
   return false;
 }
 function hiddenSiblingMessage(root){
-  // Templates often ship a hidden "done" block next to the form; reuse it when present.
+  /** Templates often ship a hidden done-block next to the form; reuse it when present. */
   var parent = root.parentElement; if (!parent) return null;
   var kids = parent.children;
   for (var i=0;i<kids.length;i++){
@@ -246,7 +238,7 @@ document.addEventListener('keydown', function(e){
   var box = t.closest('[data-cms-synthetic][data-cms-form]'); if (!box) return;
   e.preventDefault(); submit(box);
 }, true);
-// No-JS fallback round-trip: ?cms-form=ok&form=<id> after a redirect.
+// No-JS round-trip: ?cms-form=ok&form=<id> after the redirect.
 try {
   var q = new URLSearchParams(location.search); var okId = q.get('cms-form')==='ok' ? q.get('form') : null;
   if (okId){ var el = document.querySelector('[data-cms-form="'+okId.replace(/"/g,'')+'"]'); if (el){ showSuccess(el, el.getAttribute('data-cms-success') || CFG.success[okId] || ''); el.scrollIntoView({block:'center'}); } }

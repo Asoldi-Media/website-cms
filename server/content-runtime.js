@@ -1,9 +1,6 @@
-/**
- * Browser fill for data-cms-slot from GET /api/cms/catalog and /api/cms/posts.
- * Injected after asoldi-hydrator so CMS JSON wins on slotted nodes.
- */
+/** Fills `data-cms-slot` from `/api/cms/catalog` and `/api/cms/posts`. Runs after the asoldi hydrator. */
 export function contentRuntimeScript() {
-  return `(function(){
+    return `(function(){
 if (window.__cmsContentRuntime) return; window.__cmsContentRuntime = true;
 var SLOT='data-cms-slot';
 var WHEN='data-cms-when';

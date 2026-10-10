@@ -19,6 +19,7 @@ This repo is **@damianhch/client-cms** (v1.8.0): the **client-facing CMS package
 | What | Where |
 |------|--------|
 | **This package** | npm: `@damianhch/client-cms`. GitHub: https://github.com/Asoldi-Media/website-cms |
+| **Source** | `server/` (API) and `client/` (React admin, `.jsx`). See `docs/ai/layout.md` and CONTRIBUTING.md. |
 | **Hub (super-admin)** | Asoldi website repo. URL: that site’s `/superadmin` (e.g. asoldi.com/superadmin). You add client sites there, set website plan, feature flags, and ecommerce catalog type. |
 | **Client data** | On each client’s server: users, products, categories, admin credentials. This package writes to `dataPath/cms/`. |
 | **Feature flags + catalog type** | Stored in the hub; this package only reads them via `GET /api/hub/site-config?site_key=...`. |
@@ -45,6 +46,8 @@ HTML Hostinger apps instead call `mountCmsAdmin(app)` and skip the React route.
 4. **Env (e.g. Hostinger):** `CMS_HUB_URL`, `CMS_SITE_KEY` (and optionally `CMS_ADMIN_USERNAME`, `CMS_ADMIN_PASSWORD` for first-run admin). Data defaults to `~/.asoldi-cms-data/<siteKey>`.
 
 The hub is **not** in this repo; it stays in the Asoldi website project. This repo only contains what gets npm-published for client sites.
+
+Website Creator's Step 3 writes `cms.site.json` and stamps `data-cms-slot` / `data-cms-form` in the site HTML. The closed list of purposes, schema keys, slots, and public endpoints is `server/capabilities.js`. Do not rename those feelers. Creator reads that file by path after it copies this repo.
 
 ---
 
@@ -74,6 +77,6 @@ When the agency enables “Ecommerce” and picks a catalog type in the super-ad
 
 ## Summary
 
-- **This repo** = client CMS package only (users, typed ecommerce, future blog/social/analytics). Publish as `@damianhch/client-cms`.
+- **This repo** = client CMS package (users, ecommerce, blog, analytics, email, media, site editor). Publish as `@damianhch/client-cms`.
 - **Super-admin** = in the Asoldi website repo; you manage client sites, website plans, and feature flags there.
 - **Client sites** = install this package, set env, mount `/api/cms` and `/admin`; their data lives on their server.

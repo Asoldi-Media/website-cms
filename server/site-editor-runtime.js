@@ -1,5 +1,6 @@
+/** Browser side panel for the visual editor. It does not set contenteditable. */
 export function siteEditorRuntimeScript() {
-  return `(function(){
+    return `(function(){
 if (window.__asoldiSiteEditor) return; window.__asoldiSiteEditor = true;
 var TEXT='data-asoldi-text', MEDIA='data-asoldi-media', KEY='data-asoldi-key', SECTION='data-asoldi-section', CMS='data-cms-slot', HID='data-asoldi-hidden', INS='data-asoldi-inserted';
 var state = { ready:false, page:{ route:'/', kind:'other', isTemplate:false, catalogType:'' }, patches:[], selected:null };

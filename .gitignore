@@ -1,4 +1,5 @@
 node_modules/
+dist/
 .dev-data
 *.log
 .DS_Store

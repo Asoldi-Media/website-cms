@@ -75,7 +75,10 @@ test('media library: upload, list, alt/rename, delete; index stays private', asy
     assert.equal((await fetch(`${base}/upload`, { method: 'POST', headers: auth, body: bad })).status, 400);
 
     const list = await fetch(`${base}/media`, { headers: auth }).then((r) => r.json());
-    assert.equal(list.items.length, 3);
+    const listed = list.items.map((item) => item.name);
+    assert.ok(listed.includes('Pizza-O.png'));
+    assert.ok(listed.includes('test-innlegg-1.svg'));
+    assert.equal(listed.length, 6);
     assert.equal(list.maxBytes, 25 * 1024 * 1024);
 
     const served = await fetch(`${base}/uploads/Pizza-O.png`);
@@ -102,6 +105,6 @@ test('media library: upload, list, alt/rename, delete; index stays private', asy
     assert.equal((await fetch(`${base}/media/..%2F..%2Fadmin.json`, { method: 'DELETE', headers: auth })).status, 404);
     assert.equal((await fetch(`${base}/media/margherita.png`, { method: 'DELETE', headers: auth })).status, 200);
     assert.equal(existsSync(path.join(root, 'cms', 'uploads', 'margherita.png')), false);
-    assert.equal((await fetch(`${base}/media`, { headers: auth }).then((r) => r.json())).items.length, 2);
+    assert.equal((await fetch(`${base}/media`, { headers: auth }).then((r) => r.json())).items.length, 5);
   });
 });

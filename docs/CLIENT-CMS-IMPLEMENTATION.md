@@ -1,5 +1,7 @@
 # Client CMS implementation notes
 
+Source is `server/` and `client/`. Hostinger and Website Creator run those files directly. See `docs/ai/layout.md`.
+
 ## Architecture
 
 ```

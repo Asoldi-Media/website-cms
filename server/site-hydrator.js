@@ -1,5 +1,5 @@
+/** Apply published asoldi patches. Nodes with data-cms-slot are left alone. */
 import { normalizePatch, normalizePatchList } from './site-edits.js';
-
 export const TEXT_ATTR = 'data-asoldi-text';
 export const MEDIA_ATTR = 'data-asoldi-media';
 export const SECTION_ATTR = 'data-asoldi-section';
@@ -7,287 +7,378 @@ export const KEY_ATTR = 'data-asoldi-key';
 export const CMS_SLOT_ATTR = 'data-cms-slot';
 export const HIDDEN_ATTR = 'data-asoldi-hidden';
 export const INSERTED_ATTR = 'data-asoldi-inserted';
-
 const VOID_TAGS = new Set(['img', 'input', 'br', 'hr', 'meta', 'link', 'source', 'area', 'col', 'embed', 'track', 'wbr']);
-
 function escapeRe(value) {
-  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
-
 function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
 }
-
 function escapeAttr(value) {
-  return String(value ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    return String(value ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 }
-
 function openTagRe(attr, key) {
-  return new RegExp(`<([a-zA-Z][a-zA-Z0-9-]*)(\\s[^>]*${escapeRe(attr)}="${escapeRe(key)}"[^>]*?)(\\/?)>`, 'i');
+    return new RegExp(`<([a-zA-Z][a-zA-Z0-9-]*)(\\s[^>]*${escapeRe(attr)}="${escapeRe(key)}"[^>]*?)(\\/?)>`, 'i');
 }
-
 function skipOpen(attrs, skipCmsSlots) {
-  return skipCmsSlots && /data-cms-slot\s*=/i.test(String(attrs || ''));
+    return skipCmsSlots && /data-cms-slot\s*=/i.test(String(attrs || ''));
 }
-
 function findClose(html, tag, start) {
-  const lower = tag.toLowerCase();
-  const openRe = new RegExp(`<${escapeRe(tag)}(?:\\s|>)`, 'ig');
-  const closeRe = new RegExp(`</${escapeRe(tag)}>`, 'ig');
-  openRe.lastIndex = start;
-  closeRe.lastIndex = start;
-  let depth = 1;
-  let cursor = start;
-  while (cursor < html.length && depth > 0) {
-    closeRe.lastIndex = cursor;
-    openRe.lastIndex = cursor;
-    const close = closeRe.exec(html);
-    if (!close) return -1;
-    const between = html.slice(cursor, close.index);
-    const nested = between.match(new RegExp(`<${escapeRe(lower)}(?:\\s|>)`, 'ig'));
-    depth += nested ? nested.length : 0;
-    depth -= 1;
-    if (depth === 0) return close.index;
-    cursor = close.index + close[0].length;
-  }
-  return -1;
+    const lower = tag.toLowerCase();
+    const openRe = new RegExp(`<${escapeRe(tag)}(?:\\s|>)`, 'ig');
+    const closeRe = new RegExp(`</${escapeRe(tag)}>`, 'ig');
+    openRe.lastIndex = start;
+    closeRe.lastIndex = start;
+    let depth = 1;
+    let cursor = start;
+    while (cursor < html.length && depth > 0) {
+        closeRe.lastIndex = cursor;
+        openRe.lastIndex = cursor;
+        const close = closeRe.exec(html);
+        if (!close)
+            return -1;
+        const between = html.slice(cursor, close.index);
+        const nested = between.match(new RegExp(`<${escapeRe(lower)}(?:\\s|>)`, 'ig'));
+        depth += nested ? nested.length : 0;
+        depth -= 1;
+        if (depth === 0)
+            return close.index;
+        cursor = close.index + close[0].length;
+    }
+    return -1;
 }
-
 function replaceInner(html, attr, key, nextInner, skipCmsSlots) {
-  const re = openTagRe(attr, key);
-  const match = html.match(re);
-  if (!match) return html;
-  if (skipOpen(match[2], skipCmsSlots)) return html;
-  const tag = match[1];
-  if (VOID_TAGS.has(tag.toLowerCase()) || match[3] === '/') return html;
-  const start = match.index + match[0].length;
-  const end = findClose(html, tag, start);
-  if (end < 0) return html;
-  return html.slice(0, start) + escapeHtml(nextInner) + html.slice(end);
+    const re = openTagRe(attr, key);
+    const match = html.match(re);
+    if (!match)
+        return html;
+    if (skipOpen(match[2], skipCmsSlots))
+        return html;
+    const tag = match[1];
+    if (VOID_TAGS.has(tag.toLowerCase()) || match[3] === '/')
+        return html;
+    const start = match.index + match[0].length;
+    const end = findClose(html, tag, start);
+    if (end < 0)
+        return html;
+    return html.slice(0, start) + escapeHtml(nextInner) + html.slice(end);
 }
-
 function replaceAttr(html, attr, key, name, value, skipCmsSlots) {
-  const re = openTagRe(attr, key);
-  const match = html.match(re);
-  if (!match) return html;
-  if (skipOpen(match[2], skipCmsSlots)) return html;
-  let attrs = match[2];
-  const nameRe = new RegExp(`\\s${escapeRe(name)}=(["'])[\\s\\S]*?\\1`, 'i');
-  if (nameRe.test(attrs)) attrs = attrs.replace(nameRe, ` ${name}="${escapeAttr(value)}"`);
-  else attrs += ` ${name}="${escapeAttr(value)}"`;
-  return html.slice(0, match.index) + `<${match[1]}${attrs}${match[3]}>` + html.slice(match.index + match[0].length);
+    const re = openTagRe(attr, key);
+    const match = html.match(re);
+    if (!match)
+        return html;
+    if (skipOpen(match[2], skipCmsSlots))
+        return html;
+    let attrs = match[2];
+    const nameRe = new RegExp(`\\s${escapeRe(name)}=(["'])[\\s\\S]*?\\1`, 'i');
+    if (nameRe.test(attrs))
+        attrs = attrs.replace(nameRe, ` ${name}="${escapeAttr(value)}"`);
+    else
+        attrs += ` ${name}="${escapeAttr(value)}"`;
+    return html.slice(0, match.index) + `<${match[1]}${attrs}${match[3]}>` + html.slice(match.index + match[0].length);
 }
-
 function elementSlice(html, attr, key) {
-  const re = openTagRe(attr, key);
-  const match = html.match(re);
-  if (!match) return null;
-  const tag = match[1];
-  if (VOID_TAGS.has(tag.toLowerCase()) || match[3] === '/') {
-    return { start: match.index, end: match.index + match[0].length, open: match };
-  }
-  const innerStart = match.index + match[0].length;
-  const closeAt = findClose(html, tag, innerStart);
-  if (closeAt < 0) return null;
-  const closeLen = `</${tag}>`.length;
-  return { start: match.index, end: closeAt + closeLen, open: match };
+    const re = openTagRe(attr, key);
+    const match = html.match(re);
+    if (!match)
+        return null;
+    const tag = match[1];
+    if (VOID_TAGS.has(tag.toLowerCase()) || match[3] === '/') {
+        return { start: match.index, end: match.index + match[0].length, open: match };
+    }
+    const innerStart = match.index + match[0].length;
+    const closeAt = findClose(html, tag, innerStart);
+    if (closeAt < 0)
+        return null;
+    const closeLen = `</${tag}>`.length;
+    return { start: match.index, end: closeAt + closeLen, open: match };
 }
-
 function applyHideHtml(html, patch, skipCmsSlots) {
-  const slice = elementSlice(html, KEY_ATTR, patch.key);
-  if (!slice) return html;
-  if (skipOpen(slice.open[2], skipCmsSlots)) return html;
-  let attrs = slice.open[2];
-  if (!/\sdata-asoldi-hidden=/.test(attrs)) attrs += ` ${HIDDEN_ATTR}="1"`;
-  if (!/\shidden(?:\s|=|>)/i.test(attrs)) attrs += ' hidden';
-  const nextOpen = `<${slice.open[1]}${attrs}${slice.open[3]}>`;
-  return html.slice(0, slice.open.index) + nextOpen + html.slice(slice.open.index + slice.open[0].length);
+    const slice = elementSlice(html, KEY_ATTR, patch.key);
+    if (!slice)
+        return html;
+    if (skipOpen(slice.open[2], skipCmsSlots))
+        return html;
+    let attrs = slice.open[2];
+    if (!/\sdata-asoldi-hidden=/.test(attrs))
+        attrs += ` ${HIDDEN_ATTR}="1"`;
+    if (!/\shidden(?:\s|=|>)/i.test(attrs))
+        attrs += ' hidden';
+    const nextOpen = `<${slice.open[1]}${attrs}${slice.open[3]}>`;
+    return html.slice(0, slice.open.index) + nextOpen + html.slice(slice.open.index + slice.open[0].length);
 }
-
 function applyInsertHtml(html, patch) {
-  const afterKey = String(patch.afterKey || '').trim();
-  if (!afterKey || !patch.html) return html;
-  const slice = elementSlice(html, KEY_ATTR, afterKey);
-  if (!slice) return html;
-  return html.slice(0, slice.end) + patch.html + html.slice(slice.end);
+    const afterKey = String(patch.afterKey || '').trim();
+    if (!afterKey || !patch.html)
+        return html;
+    const slice = elementSlice(html, KEY_ATTR, afterKey);
+    if (!slice)
+        return html;
+    return html.slice(0, slice.end) + patch.html + html.slice(slice.end);
 }
-
 function applyRemoveHtml(html, patch) {
-  const slice = elementSlice(html, KEY_ATTR, patch.key) || elementSlice(html, TEXT_ATTR, patch.key);
-  if (!slice) return html;
-  return html.slice(0, slice.start) + html.slice(slice.end);
+    const slice = elementSlice(html, KEY_ATTR, patch.key) || elementSlice(html, TEXT_ATTR, patch.key);
+    if (!slice)
+        return html;
+    return html.slice(0, slice.start) + html.slice(slice.end);
 }
-
+/** Pathname with a leading slash and no trailing slash. */
 export function normalizeRoutePath(route) {
-  let path = String(route || '').trim();
-  if (!path) return '';
-  try {
-    if (/^https?:\/\//i.test(path)) path = new URL(path).pathname;
-  } catch {
-    /* keep */
-  }
-  path = path.split('?')[0].split('#')[0];
-  if (!path.startsWith('/')) path = `/${path}`;
-  if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
-  return path || '/';
+    let path = String(route || '').trim();
+    if (!path)
+        return '';
+    try {
+        if (/^https?:\/\//i.test(path))
+            path = new URL(path).pathname;
+    }
+    catch {
+        /* keep */
+    }
+    path = path.split('?')[0].split('#')[0];
+    if (!path.startsWith('/'))
+        path = `/${path}`;
+    if (path.length > 1 && path.endsWith('/'))
+        path = path.slice(0, -1);
+    return path || '/';
 }
-
+/** Route stamped on the HTML, or /. */
 export function routeFromHtml(html) {
-  const match = String(html || '').match(/data-asoldi-route="([^"]*)"/i);
-  return match ? normalizeRoutePath(match[1]) : '';
+    const match = String(html || '').match(/data-asoldi-route="([^"]*)"/i);
+    return match ? normalizeRoutePath(match[1]) : '';
 }
-
+/** True when a patch applies to this page route. */
 export function patchMatchesRoute(patch, pageRoute) {
-  const wanted = normalizeRoutePath(patch?.route);
-  if (!wanted) return true;
-  const current = normalizeRoutePath(pageRoute);
-  if (!current) return true;
-  return wanted === current;
+    const wanted = normalizeRoutePath(patch?.route);
+    if (!wanted)
+        return true;
+    const current = normalizeRoutePath(pageRoute);
+    if (!current)
+        return true;
+    return wanted === current;
 }
-
 function applyMoveHtml(html, patch) {
-  const slice = elementSlice(html, KEY_ATTR, patch.key);
-  if (!slice) return html;
-  const block = html.slice(slice.start, slice.end);
-  const without = html.slice(0, slice.start) + html.slice(slice.end);
-  if (patch.beforeKey) {
-    const target = elementSlice(without, KEY_ATTR, patch.beforeKey);
-    if (!target) return html;
-    return without.slice(0, target.start) + block + without.slice(target.start);
-  }
-  if (patch.afterKey) {
-    const target = elementSlice(without, KEY_ATTR, patch.afterKey);
-    if (!target) return html;
-    return without.slice(0, target.end) + block + without.slice(target.end);
-  }
-  return html;
+    const slice = elementSlice(html, KEY_ATTR, patch.key);
+    if (!slice)
+        return html;
+    const block = html.slice(slice.start, slice.end);
+    const without = html.slice(0, slice.start) + html.slice(slice.end);
+    if (patch.beforeKey) {
+        const target = elementSlice(without, KEY_ATTR, patch.beforeKey);
+        if (!target)
+            return html;
+        return without.slice(0, target.start) + block + without.slice(target.start);
+    }
+    if (patch.afterKey) {
+        const target = elementSlice(without, KEY_ATTR, patch.afterKey);
+        if (!target)
+            return html;
+        return without.slice(0, target.end) + block + without.slice(target.end);
+    }
+    return html;
 }
-
+/** HTML with published patches applied. CMS slots are skipped. */
 export function applyPatchesToHtml(html, patches, { skipCmsSlots = true, route } = {}) {
-  let out = String(html || '');
-  const pageRoute = route != null && String(route).trim() ? normalizeRoutePath(route) : routeFromHtml(out);
-  for (const patch of normalizePatchList(patches)) {
-    if (!patchMatchesRoute(patch, pageRoute)) continue;
-    if (patch.type === 'text') out = replaceInner(out, TEXT_ATTR, patch.key, String(patch.value ?? ''), skipCmsSlots);
-    else if (patch.type === 'media') out = replaceAttr(out, MEDIA_ATTR, patch.key, 'src', String(patch.value ?? ''), skipCmsSlots);
-    else if (patch.type === 'href') out = replaceAttr(out, TEXT_ATTR, patch.key, 'href', String(patch.href || patch.value || ''), skipCmsSlots);
-    else if (patch.type === 'hide') out = patch.hidden === false ? out : applyHideHtml(out, patch, skipCmsSlots);
-    else if (patch.type === 'insert') out = applyInsertHtml(out, patch);
-    else if (patch.type === 'remove') out = applyRemoveHtml(out, patch);
-    else if (patch.type === 'move') out = applyMoveHtml(out, patch);
-  }
-  return out;
+    let out = String(html || '');
+    const pageRoute = route != null && String(route).trim() ? normalizeRoutePath(route) : routeFromHtml(out);
+    for (const patch of normalizePatchList(patches)) {
+        if (!patchMatchesRoute(patch, pageRoute))
+            continue;
+        if (patch.type === 'text')
+            out = replaceInner(out, TEXT_ATTR, patch.key, String(patch.value ?? ''), skipCmsSlots);
+        else if (patch.type === 'media')
+            out = replaceAttr(out, MEDIA_ATTR, patch.key, 'src', String(patch.value ?? ''), skipCmsSlots);
+        else if (patch.type === 'href')
+            out = replaceAttr(out, TEXT_ATTR, patch.key, 'href', String(patch.href || patch.value || ''), skipCmsSlots);
+        else if (patch.type === 'hide')
+            out = patch.hidden === false ? out : applyHideHtml(out, patch, skipCmsSlots);
+        else if (patch.type === 'insert')
+            out = applyInsertHtml(out, patch);
+        else if (patch.type === 'remove')
+            out = applyRemoveHtml(out, patch);
+        else if (patch.type === 'move')
+            out = applyMoveHtml(out, patch);
+    }
+    return out;
 }
-
+/** Replace text and keep a one-letter span wrapper when the node uses one. */
 export function setElementTextPreserveChrome(el, next) {
-  if (!el) return;
-  const value = next == null ? '' : String(next);
-  if (String(el.textContent || '') === value) return;
-  const nodes = [...(el.childNodes || [])];
-  const proto = nodes.find((node) => node.nodeType === 1 && node.tagName === 'SPAN' && String(node.textContent || '').length === 1);
-  const onlySimple = nodes.length > 0 && nodes.every((node) => (
-    node.nodeType === 3
-    || (node.nodeType === 1 && node.tagName === 'SPAN' && String(node.textContent || '').length <= 2)
-  ));
-  if (proto && onlySimple && value.trim()) {
-    const doc = el.ownerDocument;
-    el.textContent = '';
-    for (const part of value.split(/(\s+)/)) {
-      if (!part) continue;
-      if (/^\s+$/.test(part)) {
-        el.appendChild(doc.createTextNode(part));
-        continue;
-      }
-      const wrap = proto.cloneNode(false);
-      wrap.textContent = part.charAt(0);
-      el.appendChild(wrap);
-      if (part.length > 1) el.appendChild(doc.createTextNode(part.slice(1)));
+    if (!el)
+        return;
+    const value = next == null ? '' : String(next);
+    if (String(el.textContent || '') === value)
+        return;
+    const nodes = [...(el.childNodes || [])];
+    const proto = nodes.find((node) => node.nodeType === 1 && node.tagName === 'SPAN' && String(node.textContent || '').length === 1);
+    const onlySimple = nodes.length > 0 && nodes.every((node) => (node.nodeType === 3
+        || (node.nodeType === 1 && node.tagName === 'SPAN' && String(node.textContent || '').length <= 2)));
+    if (proto && onlySimple && value.trim()) {
+        const doc = el.ownerDocument;
+        el.textContent = '';
+        for (const part of value.split(/(\s+)/)) {
+            if (!part)
+                continue;
+            if (/^\s+$/.test(part)) {
+                el.appendChild(doc.createTextNode(part));
+                continue;
+            }
+            const wrap = proto.cloneNode(false);
+            wrap.textContent = part.charAt(0);
+            el.appendChild(wrap);
+            if (part.length > 1)
+                el.appendChild(doc.createTextNode(part.slice(1)));
+        }
+        return;
     }
-    return;
-  }
-  el.textContent = value;
+    el.textContent = value;
 }
-
+/** True for nodes the visual editor must not rewrite. */
 export function shouldSkipElement(el) {
-  if (!el || el.nodeType !== 1) return true;
-  if (el.hasAttribute?.(CMS_SLOT_ATTR)) return true;
-  if (typeof el.closest === 'function' && el.closest(`[${CMS_SLOT_ATTR}]`)) return true;
-  return false;
+    if (!el || el.nodeType !== 1)
+        return true;
+    if (el.hasAttribute?.(CMS_SLOT_ATTR))
+        return true;
+    if (typeof el.closest === 'function' && el.closest(`[${CMS_SLOT_ATTR}]`))
+        return true;
+    return false;
 }
-
+/** Same patch pass as applyPatchesToHtml, on a live document. */
 export function applyPatchesToDocument(document, patches, { skipCmsSlots = true, editor = false, route } = {}) {
-  if (!document) return;
-  const marked = document.querySelector?.('[data-asoldi-route]')?.getAttribute('data-asoldi-route');
-  const pageRoute = route != null && String(route).trim()
-    ? normalizeRoutePath(route)
-    : normalizeRoutePath(marked || document.defaultView?.location?.pathname || '');
-  for (const patch of normalizePatchList(patches)) {
-    if (!patchMatchesRoute(patch, pageRoute)) continue;
-    if (patch.type === 'text') {
-      const el = document.querySelector(`[${TEXT_ATTR}="${cssEscape(patch.key)}"]`);
-      if (!el || (skipCmsSlots && shouldSkipElement(el))) continue;
-      setElementTextPreserveChrome(el, patch.value);
-    } else if (patch.type === 'media') {
-      const el = document.querySelector(`[${MEDIA_ATTR}="${cssEscape(patch.key)}"]`)
-        || (patch.sectionKey ? document.querySelector(`[${KEY_ATTR}="${cssEscape(patch.sectionKey)}"]`) : null);
-      if (!el || (skipCmsSlots && shouldSkipElement(el))) continue;
-      const url = String(patch.value ?? '');
-      if (el.hasAttribute('src') || /^(IMG|VIDEO|SOURCE)$/i.test(el.tagName)) el.setAttribute('src', url);
-      else el.style.backgroundImage = `url("${url.replace(/"/g, '\\"')}")`;
-    } else if (patch.type === 'href') {
-      const el = document.querySelector(`[${TEXT_ATTR}="${cssEscape(patch.key)}"]`);
-      if (!el || (skipCmsSlots && shouldSkipElement(el))) continue;
-      const link = el.tagName === 'A' ? el : el.closest?.('a');
-      if (link) link.setAttribute('href', String(patch.href || patch.value || ''));
-    } else if (patch.type === 'hide') {
-      const el = document.querySelector(`[${KEY_ATTR}="${cssEscape(patch.key)}"]`);
-      if (!el || (skipCmsSlots && shouldSkipElement(el))) continue;
-      if (patch.hidden === false) {
-        el.removeAttribute('hidden');
-        el.removeAttribute(HIDDEN_ATTR);
-        el.style.removeProperty('display');
-        el.style.removeProperty('opacity');
-        continue;
-      }
-      el.setAttribute(HIDDEN_ATTR, '1');
-      if (editor) {
-        el.style.opacity = '0.35';
-        el.style.outline = '1px dashed #94a3b8';
-      } else {
-        el.setAttribute('hidden', '');
-        el.style.display = 'none';
-      }
-    } else if (patch.type === 'insert') {
-      const after = document.querySelector(`[${KEY_ATTR}="${cssEscape(patch.afterKey)}"]`);
-      if (!after || !patch.html) continue;
-      after.insertAdjacentHTML('afterend', patch.html);
-    } else if (patch.type === 'remove') {
-      const el = document.querySelector(`[${KEY_ATTR}="${cssEscape(patch.key)}"]`);
-      if (el) el.remove();
-    } else if (patch.type === 'move') {
-      const el = document.querySelector(`[${KEY_ATTR}="${cssEscape(patch.key)}"]`);
-      if (!el) continue;
-      if (patch.beforeKey) {
-        const target = document.querySelector(`[${KEY_ATTR}="${cssEscape(patch.beforeKey)}"]`);
-        if (target?.parentNode) target.parentNode.insertBefore(el, target);
-      } else if (patch.afterKey) {
-        const target = document.querySelector(`[${KEY_ATTR}="${cssEscape(patch.afterKey)}"]`);
-        if (target) target.insertAdjacentElement('afterend', el);
-      }
+    if (!document)
+        return;
+    const marked = document.querySelector?.('[data-asoldi-route]')?.getAttribute('data-asoldi-route');
+    const pageRoute = route != null && String(route).trim()
+        ? normalizeRoutePath(route)
+        : normalizeRoutePath(marked || document.defaultView?.location?.pathname || '');
+    for (const patch of normalizePatchList(patches)) {
+        if (!patchMatchesRoute(patch, pageRoute))
+            continue;
+        if (patch.type === 'text') {
+            const el = queryByPatch(document, TEXT_ATTR, patch);
+            if (!el || (skipCmsSlots && shouldSkipElement(el)))
+                continue;
+            setElementTextPreserveChrome(el, patch.value);
+        }
+        else if (patch.type === 'media') {
+            const el = queryByPatch(document, MEDIA_ATTR, patch);
+            if (!el || (skipCmsSlots && shouldSkipElement(el)))
+                continue;
+            const url = String(patch.value ?? '');
+            if (el.hasAttribute('src') || /^(IMG|VIDEO|SOURCE)$/i.test(el.tagName))
+                el.setAttribute('src', url);
+            else
+                el.style.backgroundImage = `url("${url.replace(/"/g, '\\"')}")`;
+        }
+        else if (patch.type === 'href') {
+            const el = queryByPatch(document, TEXT_ATTR, patch);
+            if (!el || (skipCmsSlots && shouldSkipElement(el)))
+                continue;
+            const link = el.tagName === 'A' ? el : el.closest?.('a');
+            if (link)
+                link.setAttribute('href', String(patch.href || patch.value || ''));
+        }
+        else if (patch.type === 'hide') {
+            const el = document.querySelector(`[${KEY_ATTR}="${cssEscape(patch.key)}"]`);
+            if (!el || (skipCmsSlots && shouldSkipElement(el)))
+                continue;
+            if (patch.hidden === false) {
+                el.removeAttribute('hidden');
+                el.removeAttribute(HIDDEN_ATTR);
+                el.style.removeProperty('display');
+                el.style.removeProperty('opacity');
+                continue;
+            }
+            el.setAttribute(HIDDEN_ATTR, '1');
+            if (editor) {
+                el.style.opacity = '0.35';
+                el.style.outline = '1px dashed #94a3b8';
+            }
+            else {
+                el.setAttribute('hidden', '');
+                el.style.display = 'none';
+            }
+        }
+        else if (patch.type === 'insert') {
+            const after = document.querySelector(`[${KEY_ATTR}="${cssEscape(patch.afterKey)}"]`);
+            if (!after || !patch.html)
+                continue;
+            after.insertAdjacentHTML('afterend', patch.html);
+        }
+        else if (patch.type === 'remove') {
+            const el = document.querySelector(`[${KEY_ATTR}="${cssEscape(patch.key)}"]`);
+            if (el)
+                el.remove();
+        }
+        else if (patch.type === 'move') {
+            const el = document.querySelector(`[${KEY_ATTR}="${cssEscape(patch.key)}"]`);
+            if (!el)
+                continue;
+            if (patch.beforeKey) {
+                const target = document.querySelector(`[${KEY_ATTR}="${cssEscape(patch.beforeKey)}"]`);
+                if (target?.parentNode)
+                    target.parentNode.insertBefore(el, target);
+            }
+            else if (patch.afterKey) {
+                const target = document.querySelector(`[${KEY_ATTR}="${cssEscape(patch.afterKey)}"]`);
+                if (target)
+                    target.insertAdjacentElement('afterend', el);
+            }
+        }
     }
-  }
 }
-
 function cssEscape(value) {
-  if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(String(value || ''));
-  return String(value || '').replace(/["\\]/g, '\\$&');
+    const css = globalThis.CSS;
+    if (css && typeof css.escape === 'function')
+        return css.escape(String(value || ''));
+    return String(value || '').replace(/["\\]/g, '\\$&');
 }
-
+function selectorFromKey(key) {
+    const raw = String(key || '');
+    if (raw.startsWith('auto-media/'))
+        return raw.slice('auto-media/'.length);
+    return '';
+}
+/** Marker first. A CSS path is only for an unmarked image/background, and only when it matches one element. */
+export function matchPatchElement(document, attr, patch) {
+    if (!document?.querySelector || !patch)
+        return null;
+    const key = String(patch.key || '');
+    const byMarker = key ? document.querySelector(`[${attr}="${cssEscape(key)}"]`) : null;
+    if (byMarker)
+        return byMarker;
+    if (attr !== MEDIA_ATTR || !key.startsWith('auto-media/'))
+        return null;
+    const sel = String(patch.selector || selectorFromKey(key) || '').trim();
+    if (!sel || typeof document.querySelectorAll !== 'function')
+        return null;
+    let matches;
+    try {
+        matches = document.querySelectorAll(sel);
+    }
+    catch {
+        return null;
+    }
+    if (!matches || matches.length !== 1)
+        return null;
+    const el = matches[0];
+    if (!el || shouldSkipElement(el))
+        return null;
+    const existing = el.getAttribute?.(attr) || '';
+    if (existing && existing !== key)
+        return null;
+    if (!existing)
+        el.setAttribute(attr, key);
+    return el;
+}
+function queryByPatch(document, attr, patch) {
+    return matchPatchElement(document, attr, patch);
+}
+/** Browser copy of the patch applier, served at /api/cms/site-hydrator.js. */
 export function siteHydratorScript() {
-  return `(function(){
+    return `(function(){
 if (window.__asoldiSiteHydrator) return; window.__asoldiSiteHydrator = true;
 var CMS='data-cms-slot', TEXT='data-asoldi-text', MEDIA='data-asoldi-media', KEY='data-asoldi-key', HID='data-asoldi-hidden';
 function esc(v){ try { return CSS.escape(String(v||'')); } catch(e){ return String(v||'').replace(/["\\\\]/g,'\\\\$&'); } }
@@ -335,6 +426,22 @@ function matchRoute(p, route){
   if (!current) return true;
   return wanted===current;
 }
+function findEl(doc, attr, p){
+  var key=String(p&&p.key||'');
+  var el=key?doc.querySelector('['+attr+'="'+esc(key)+'"]'):null;
+  if (el) return el;
+  if (attr!==MEDIA || key.indexOf('auto-media/')!==0) return null;
+  var sel=String((p&&p.selector)||key.slice(11)||'');
+  var list=null;
+  try { list=sel?doc.querySelectorAll(sel):null; } catch(e){ list=null; }
+  if (!list || list.length!==1) return null;
+  el=list[0];
+  if (!el || skip(el)) return null;
+  var existing=el.getAttribute(attr)||'';
+  if (existing && existing!==key) return null;
+  if (!existing) el.setAttribute(attr, key);
+  return el;
+}
 function apply(doc, patches){
   if (!doc || !patches) return;
   var route=pageRoute(doc);
@@ -342,17 +449,17 @@ function apply(doc, patches){
     var p=patches[i]; if (!p || !p.type) continue;
     if (!matchRoute(p, route)) continue;
     if (p.type==='text'){
-      var t=doc.querySelector('['+TEXT+'="'+esc(p.key)+'"]');
+      var t=findEl(doc, TEXT, p);
       if (!t || skip(t)) continue;
       setText(t, p.value);
     } else if (p.type==='media'){
-      var m=doc.querySelector('['+MEDIA+'="'+esc(p.key)+'"]');
+      var m=findEl(doc, MEDIA, p);
       if (!m || skip(m)) continue;
       var url=String(p.value||'');
       if (m.hasAttribute('src') || /^(IMG|VIDEO|SOURCE)$/i.test(m.tagName)) m.setAttribute('src', url);
       else m.style.backgroundImage='url("'+url.replace(/"/g,'\\\\"')+'")';
     } else if (p.type==='href'){
-      var h=doc.querySelector('['+TEXT+'="'+esc(p.key)+'"]');
+      var h=findEl(doc, TEXT, p);
       if (!h || skip(h)) continue;
       var a=h.tagName==='A'?h:(h.closest&&h.closest('a'));
       if (a) a.setAttribute('href', String(p.href||p.value||''));
@@ -391,26 +498,31 @@ if (window.__ASOLDI_SITE_EDITS__ && window.__ASOLDI_SITE_EDITS__.patches) {
 }
 })();`;
 }
-
+/** Insert a tag once, keyed by marker, before </body> or </head>. */
 export function injectOnce(html, marker, tag) {
-  const source = String(html || '');
-  if (!source) return source;
-  if (source.includes(marker)) return source;
-  if (/<\/body>/i.test(source)) return source.replace(/<\/body>/i, `${tag}</body>`);
-  if (/<\/html>/i.test(source)) return source.replace(/<\/html>/i, `${tag}</html>`);
-  return `${source}${tag}`;
+    const source = String(html || '');
+    if (!source)
+        return source;
+    if (source.includes(marker))
+        return source;
+    if (/<\/body>/i.test(source))
+        return source.replace(/<\/body>/i, `${tag}</body>`);
+    if (/<\/html>/i.test(source))
+        return source.replace(/<\/html>/i, `${tag}</html>`);
+    return `${source}${tag}`;
 }
-
+/** Insert forms, hydrator, content, and editor scripts in contract order. */
 export function injectSiteRuntimes(html, { editor = false, analytics = false, injectAnalytics } = {}) {
-  let out = String(html || '');
-  if (editor) {
-    out = injectOnce(out, 'site-editor-runtime.js', '<script src="/api/cms/site-editor-runtime.js?v=4"></script>');
-  } else {
-    out = injectOnce(out, 'site-hydrator.js', '<script src="/api/cms/site-hydrator.js?v=3"></script>');
-    out = injectOnce(out, 'content-runtime.js', '<script src="/api/cms/content-runtime.js" defer></script>');
-  }
-  if (analytics && typeof injectAnalytics === 'function') out = injectAnalytics(out);
-  return out;
+    let out = String(html || '');
+    if (editor) {
+        out = injectOnce(out, 'site-editor-runtime.js', '<script src="/api/cms/site-editor-runtime.js?v=6"></script>');
+    }
+    else {
+        out = injectOnce(out, 'site-hydrator.js', '<script src="/api/cms/site-hydrator.js?v=5"></script>');
+        out = injectOnce(out, 'content-runtime.js', '<script src="/api/cms/content-runtime.js" defer></script>');
+    }
+    if (analytics && typeof injectAnalytics === 'function')
+        out = injectAnalytics(out);
+    return out;
 }
-
 export { normalizePatch };

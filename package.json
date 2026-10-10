@@ -17,27 +17,32 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
+    "lint": "eslint server client",
     "build:admin": "vite build"
   },
   "peerDependencies": {
+    "express": "^4",
     "react": "^18 || ^19",
     "react-dom": "^18 || ^19",
-    "react-router-dom": "^6 || ^7",
     "react-helmet-async": "^2 || ^3",
-    "express": "^4"
+    "react-router-dom": "^6 || ^7"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
-    "express": "^4.22.1",
+    "express": "^4",
     "multer": "^1.4.5-lts.1"
   },
   "devDependencies": {
-    "lucide-react": "^0.546.0",
+    "@eslint/js": "^10.0.1",
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.4.21",
-    "postcss": "^8.5.6",
+    "eslint": "^10.12.0",
+    "eslint-plugin-jsdoc": "^65.2.4",
+    "globals": "^17.13.0",
     "grapesjs": "^0.23.0",
     "grapesjs-preset-newsletter": "^1.0.2",
+    "lucide-react": "^0.546.0",
+    "postcss": "^8.5.6",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-helmet-async": "^2.0.5",

@@ -4,6 +4,8 @@ Client CMS for Asoldi client sites: **users**, **typed ecommerce** (menu / tiers
 
 Package version: **1.8.0**.
 
+Source is plain JavaScript in `server/` and `client/`. Install lines stay `import createCmsRoutes from '@damianhch/client-cms'` and `import { ClientCMS } from '@damianhch/client-cms/ClientCMS'`.
+
 ---
 
 ## What you need
@@ -207,4 +209,6 @@ If a client’s domain changes, update the **Domain** in the hub for that site. 
 ## See also
 
 - **CONTEXT.md** – Overview for developers / Cursor so a new environment understands the setup.
+- **docs/ai/layout.md** – Where the JavaScript lives and which files Website Creator imports.
+- **docs/ai/typescript-revert.md** – Why this package stays plain JavaScript.
 - **docs/** – Strategy and implementation notes (single per client + hub, where data lives, etc.).
