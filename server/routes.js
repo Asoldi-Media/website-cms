@@ -23,7 +23,7 @@ import { publicPayments } from './payments.js';
 import { createEmailTemplateStore, mergeFieldsMeta, shouldSeedAsoldiPresets } from './email-templates.js';
 import { loadSiteSeed } from './site-seed.js';
 import { isLocalCmsOpenRequest, localDevInboxForm, LOCAL_DEV_INBOX_FORM_ID } from './local-open.js';
-import { createMediaLibrary, isAllowedMediaName } from './media.js';
+import { createMediaLibrary, isAllowedMediaName, listPublicSiteMedia } from './media.js';
 import { createSiteEditsStore } from './site-edits.js';
 import { siteHydratorScript } from './site-hydrator.js';
 import { siteEditorRuntimeScript } from './site-editor-runtime.js';
@@ -500,7 +500,11 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
     });
     /** Media library routes. */
     router.get('/media', blogAuth, (req, res) => {
-        res.json({ items: media.list(req.baseUrl), maxBytes: media.maxBytes });
+        const uploads = media.list(req.baseUrl);
+        const taken = new Set(uploads.map((item) => item.name));
+        const fromSite = listPublicSiteMedia(resolvedPublicPath).filter((item) => !taken.has(item.name));
+        const items = [...uploads, ...fromSite].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+        res.json({ items, maxBytes: media.maxBytes });
     });
     router.post('/media', blogAuth, (req, res) => {
         upload.array('files', 20)(req, res, (error) => {

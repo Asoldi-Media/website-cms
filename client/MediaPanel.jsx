@@ -153,7 +153,7 @@ function MediaGrid({ items, selectedName, onSelect, onDelete, canDelete, cols = 
               <p className="text-[11px] text-white truncate">{item.name}</p>
               <p className="text-[10px] text-gray-400">{formatBytes(item.size)}</p>
             </div>
-            {canDelete && onDelete && (<span role="button" tabIndex={-1} onClick={(e) => {
+            {canDelete && onDelete && item.origin !== 'site' && (<span role="button" tabIndex={-1} onClick={(e) => {
                         e.stopPropagation();
                         onDelete(item);
                     }} className="absolute top-1 right-1 hidden group-hover:flex items-center justify-center w-7 h-7 rounded bg-black/70 text-gray-300 hover:text-red-400" title="Delete">
@@ -191,8 +191,8 @@ function DetailsPane({ item, onPatch, onDelete, canDelete, onClose }) {
         <dd className="text-gray-200">{item.mime}</dd>
         <dt>Size</dt>
         <dd className="text-gray-200">{formatBytes(item.size)}</dd>
-        <dt>Uploaded</dt>
-        <dd className="text-gray-200">{item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '—'}</dd>
+        <dt>{item.origin === 'site' ? 'From' : 'Uploaded'}</dt>
+        <dd className="text-gray-200">{item.origin === 'site' ? 'Original site' : item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '—'}</dd>
         {item.uploadedBy && (<>
             <dt>By</dt>
             <dd className="text-gray-200">{item.uploadedBy}</dd>
@@ -211,6 +211,7 @@ function DetailsPane({ item, onPatch, onDelete, canDelete, onClose }) {
           </button>
         </div>
       </div>
+      {item.origin === 'site' ? (<p className="text-xs text-gray-500">This file was on the site when it was created. Pick it from the library; rename and delete stay on the live page.</p>) : (<>
       <div>
         <label className="block text-xs text-gray-400 mb-1">File name</label>
         <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded bg-[#1a1a1a] border border-white/10 px-2 py-1.5 text-sm text-white"/>
@@ -231,6 +232,7 @@ function DetailsPane({ item, onPatch, onDelete, canDelete, onClose }) {
             <Trash2 size={14}/> Delete
           </button>)}
       </div>
+      </>)}
     </div>);
 }
 /** Media library admin tab. */

@@ -1,6 +1,6 @@
 # Context for Cursor / developers
 
-This repo is **@damianhch/client-cms** (v1.8.4): the **client-facing CMS package** that gets installed on each client website (e.g. mongsushi.no, or any site built by Asoldi). It is **not** the super-admin; the super-admin lives in the main Asoldi website repo.
+This repo is **@damianhch/client-cms** (v1.8.5): the **client-facing CMS package** that gets installed on each client website (e.g. mongsushi.no, or any site built by Asoldi). It is **not** the super-admin; the super-admin lives in the main Asoldi website repo.
 
 ---
 

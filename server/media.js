@@ -80,6 +80,52 @@ export function sanitizeUploadName(name = '') {
         .slice(0, 80);
     return `${stem || `file-${Date.now()}`}${ext}`;
 }
+const SKIP_PUBLIC_DIRS = new Set(['node_modules', 'admin', 'admin-dist', 'cms', 'api', '.git']);
+
+/** Images already on the live site (`public/`), listed next to CMS uploads. */
+export function listPublicSiteMedia(publicPath) {
+    const root = resolve(publicPath || '');
+    if (!publicPath || !existsSync(root))
+        return [];
+    const items = [];
+    function walk(dir, rel) {
+        let entries = [];
+        try {
+            entries = readdirSync(dir, { withFileTypes: true });
+        }
+        catch {
+            return;
+        }
+        for (const entry of entries) {
+            if (entry.name.startsWith('.'))
+                continue;
+            const nextRel = rel ? `${rel}/${entry.name}` : entry.name;
+            const full = join(dir, entry.name);
+            if (entry.isDirectory()) {
+                if (!SKIP_PUBLIC_DIRS.has(entry.name))
+                    walk(full, nextRel);
+                continue;
+            }
+            if (mediaKindForName(entry.name) !== 'image')
+                continue;
+            const stat = statSync(full);
+            items.push({
+                name: nextRel,
+                url: `/${nextRel.split('/').map(encodeURIComponent).join('/')}`,
+                size: stat.size,
+                kind: 'image',
+                mime: mediaMimeForName(entry.name),
+                alt: '',
+                uploadedBy: 'Site',
+                createdAt: stat.birthtime?.toISOString?.() || stat.mtime.toISOString(),
+                origin: 'site',
+            });
+        }
+    }
+    walk(root, '');
+    return items.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+}
+
 /** Uploads dir plus the alt-text index. Names are never overwritten. */
 export function createMediaLibrary(uploadsDir) {
     const root = resolve(uploadsDir);

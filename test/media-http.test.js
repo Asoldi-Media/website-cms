@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import express from 'express';
 import createCmsRoutes from '../server/routes.js';
-import { fixLatin1Name, readUploadMaxBytes, sanitizeUploadName } from '../server/media.js';
+import { fixLatin1Name, listPublicSiteMedia, readUploadMaxBytes, sanitizeUploadName } from '../server/media.js';
 
 async function withServer(fn) {
   const root = mkdtempSync(path.join(tmpdir(), 'asoldi-media-http-'));
@@ -45,6 +45,19 @@ test('media helpers', () => {
   assert.equal(fixLatin1Name('Crème.png'), 'Crème.png');
   assert.equal(readUploadMaxBytes({}), 25 * 1024 * 1024);
   assert.equal(readUploadMaxBytes({ CMS_UPLOAD_MAX_MB: '2' }), 2 * 1024 * 1024);
+});
+
+test('listPublicSiteMedia includes images from the live public dir', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'asoldi-site-media-'));
+  mkdirSync(path.join(root, 'images'), { recursive: true });
+  writeFileSync(path.join(root, 'images', 'hero.png'), PNG);
+  writeFileSync(path.join(root, 'note.txt'), 'skip');
+  const items = listPublicSiteMedia(root);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].name, 'images/hero.png');
+  assert.equal(items[0].url, '/images/hero.png');
+  assert.equal(items[0].origin, 'site');
+  rmSync(root, { recursive: true, force: true });
 });
 
 test('media library: upload, list, alt/rename, delete; index stays private', async () => {
@@ -106,5 +119,37 @@ test('media library: upload, list, alt/rename, delete; index stays private', asy
     assert.equal((await fetch(`${base}/media/margherita.png`, { method: 'DELETE', headers: auth })).status, 200);
     assert.equal(existsSync(path.join(root, 'cms', 'uploads', 'margherita.png')), false);
     assert.equal((await fetch(`${base}/media`, { headers: auth }).then((r) => r.json())).items.length, 5);
+  });
+});
+
+test('media library lists images from the original public site', async () => {
+  await withServer(async (base, root) => {
+    const publicDir = path.join(root, 'public');
+    mkdirSync(path.join(publicDir, 'images'), { recursive: true });
+    writeFileSync(path.join(publicDir, 'images', 'hero.png'), PNG);
+    const app = express();
+    app.use(express.json());
+    app.use('/api/cms', createCmsRoutes({
+      dataPath: path.join(root, 'cms-data'),
+      hubUrl: '',
+      siteKey: 'site-media',
+      adminSecret: 'test-secret',
+      publicPath: publicDir,
+    }));
+    const server = await new Promise((resolve) => {
+      const s = app.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    const { port } = server.address();
+    const cms = `http://127.0.0.1:${port}/api/cms`;
+    try {
+      const auth = await login(cms);
+      const list = await fetch(`${cms}/media`, { headers: auth }).then((r) => r.json());
+      const hero = list.items.find((item) => item.name === 'images/hero.png');
+      assert.ok(hero);
+      assert.equal(hero.url, '/images/hero.png');
+      assert.equal(hero.origin, 'site');
+    } finally {
+      await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    }
   });
 });
