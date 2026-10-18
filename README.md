@@ -2,7 +2,7 @@
 
 Client CMS for Asoldi client sites: **users**, **typed ecommerce** (menu / tiers / normal), and hub-driven feature flags (users, ecommerce, blog, social sync, analytics). Install in any client project; mount at `/api/cms`, show UI at `/admin`.
 
-Package version: **2.0.0**.
+Package version: **2.1.0**.
 
 Source is plain JavaScript in `server/` and `client/`. Install lines stay `import createCmsRoutes from '@damianhch/client-cms'` and `import { ClientCMS } from '@damianhch/client-cms/ClientCMS'`.
 
@@ -122,7 +122,7 @@ GET /api/cms/catalog
 → { catalogType, name, categories, products }
 ```
 
-Orders are stored on the client host (`orders.json`) and are not deleted; cancel them with status.
+Orders are stored on the client host (`orders.json`) and are not deleted; cancel them with status. The one exception is shop **test mode** (since 2.1.0, Shop → Innstillinger → Testmodus): while it is on, orders are numbered `TEST-1`, `TEST-2` … (credit notes `TEST-K1`) in their own series, stay out of reports, VAT and CSV, and buyers see a test banner on the product and cart pages. `POST /shop/admin/test-data/clear` (owner) deletes the test orders and the bookings, downloads, subscriptions, gift cards and customer rows they created, returns their stock and restarts the TEST series. Real orders and the real number series are never touched.
 
 **Payment setup** (Ecommerce → Payment setup, admin rank only) has **Connect Stripe** and **Log in with PayPal** buttons (or a PayPal email fallback). Asoldi (the hub) is the Stripe Connect platform and PayPal partner; the client host holds **no** provider keys. Every call goes server-to-server to `hubUrl/api/hub/shop/*` with the site key (`server/shop-checkout.js`).
 

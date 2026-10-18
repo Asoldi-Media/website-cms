@@ -409,6 +409,13 @@ export function createStore(dataPath) {
             writeJson(ORDERS_PATH, orders);
             return { ok: true, order: next };
         },
+        deleteOrders(ids) {
+            const drop = new Set(ids);
+            const orders = this.getAllOrders();
+            const kept = orders.filter((order) => !drop.has(order.id));
+            writeJson(ORDERS_PATH, kept);
+            return orders.length - kept.length;
+        },
         ensureDefaultList() {
             const lists = this.getAllLists();
             if (lists.length)

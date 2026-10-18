@@ -189,7 +189,9 @@ export function createShop({ store, dataPath, hubUrl, siteKey, adminSecret, getS
     db.save('discounts', rows);
   }
 
-  function nextOrderNumber() {
+  /** Next number in the real gap-free series, or in the separate TEST- series so test orders never use real numbers. */
+  function nextOrderNumber(test = db.getSettings().orders.testMode) {
+    if (test) return `TEST-${db.nextNumber('test', 1)}`;
     const settings = db.getSettings();
     return `${settings.orders.prefix}${db.nextNumber('order', settings.orders.numberStart)}`;
   }
@@ -199,11 +201,13 @@ export function createShop({ store, dataPath, hubUrl, siteKey, adminSecret, getS
     const settings = db.getSettings();
     const priced = checkout.priced;
     const email = payment.customerEmail || checkout.email || '';
-    const number = nextOrderNumber();
+    const test = settings.orders.testMode;
+    const number = nextOrderNumber(test);
     const lines = priced.lines.map((l) => ({ ...l, unitGrossMinor: l.unitGrossMinor }));
     const events = [{ at: new Date().toISOString(), type: 'created', text: `Bestilling ${number} opprettet (${checkout.provider}).` }];
     const created = store.createOrder({
       number,
+      test,
       lines,
       productId: lines[0]?.productId || '',
       productName: lines.length > 1 ? `${lines[0].name} + ${lines.length - 1} til` : lines[0]?.name || 'Bestilling',
@@ -421,7 +425,8 @@ export function createShop({ store, dataPath, hubUrl, siteKey, adminSecret, getS
       return { ok: true, skipped: true };
     }
     const settings = db.getSettings();
-    const number = nextOrderNumber();
+    const test = Boolean(store.getOrderById(sub.orderId)?.test);
+    const number = nextOrderNumber(test);
     const lines = sub.lines.map((l) => ({ ...l, key: `${l.key}|renewal|${invoiceId}` }));
     const taxByRate = new Map();
     for (const l of lines) {
@@ -432,6 +437,7 @@ export function createShop({ store, dataPath, hubUrl, siteKey, adminSecret, getS
     }
     const created = store.createOrder({
       number,
+      test,
       lines,
       productId: lines[0]?.productId || '',
       productName: `${lines[0]?.name || 'Abonnement'} (fornyelse)`,
@@ -483,7 +489,51 @@ export function createShop({ store, dataPath, hubUrl, siteKey, adminSecret, getS
     return { ok: true, subscription: sub };
   }
 
+  /** Owner reset after testing: deletes test orders and what they created, returns their stock, restarts the TEST- series. */
+  function clearTestData() {
+    const orders = store.getAllOrders().filter((o) => o.test);
+    const ids = new Set(orders.map((o) => o.id));
+    const back = [];
+    for (const o of orders) {
+      for (const l of o.lines) {
+        if (l.booking || l.kind === 'giftcard') continue;
+        const restocked = l.kind === 'physical' ? o.refunds.filter((r) => r.restocked).reduce((s, r) => s + (r.lines.find((x) => x.key === l.key)?.quantity || 0), 0) : 0;
+        back.push({ productId: l.productId, variantId: l.variantId, quantity: l.quantity - restocked });
+      }
+    }
+    stock.restock(back);
+    const counts = { orders: store.deleteOrders([...ids]) };
+    for (const name of ['bookings', 'downloads', 'subscriptions']) {
+      const rows = db.list(name);
+      const kept = rows.filter((r) => !ids.has(r.orderId));
+      counts[name] = rows.length - kept.length;
+      db.save(name, kept);
+    }
+    const cards = giftcards.all();
+    const keptCards = cards.filter((c) => !c.test && !ids.has(c.orderId));
+    counts.giftcards = cards.length - keptCards.length;
+    db.save('giftcards', keptCards);
+    const remaining = new Map(store.getAllOrders().map((o) => [o.id, o]));
+    const customers = db.list('customers');
+    const keptCustomers = customers
+      .map((c) => {
+        if (!c.orderIds.some((id) => ids.has(id))) return c;
+        const orderIds = c.orderIds.filter((id) => remaining.has(id));
+        return { ...c, orderIds, totalSpentMinor: orderIds.reduce((s, id) => s + remaining.get(id).totalMinor, 0) };
+      })
+      .filter((c) => c.orderIds.length || c.note || c.tags?.length);
+    counts.customers = customers.length - keptCustomers.length;
+    db.save('customers', keptCustomers);
+    writeCheckouts(readCheckouts().filter((c) => !ids.has(c.orderId)));
+    const counters = db.read('counters', {}) || {};
+    delete counters.test;
+    delete counters['test-credit'];
+    db.write('counters', counters);
+    return counts;
+  }
+
   return {
+    clearTestData,
     handleExpired,
     handleInvoicePaid,
     handleSubscriptionUpdated,

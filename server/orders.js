@@ -101,6 +101,7 @@ export function normalizeOrder(raw) {
     const fulfillment = raw.fulfillment && typeof raw.fulfillment === 'object' ? raw.fulfillment : {};
     return {
         number: text(raw.number, 30),
+        test: Boolean(raw.test),
         lines: rows(raw.lines).map(normalizeOrderLine),
         subtotalMinor: minor(raw.subtotalMinor),
         discountMinor: minor(raw.discountMinor),

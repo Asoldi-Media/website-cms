@@ -189,3 +189,35 @@ test('OR-5 reports, VAT per rate net of credit notes, CSV, customers, overview',
     assert.match(hub.formPosts[0].message, /Lite på lager:\nSjokolade: 2 igjen/);
   });
 });
+
+test('TM-1 test mode: TEST- numbers, kept out of reports, cleared without touching real orders or the real series', async () => {
+  await withShop(async ({ base, hub, admin }) => {
+    const mug = await createProduct(base, admin, { name: 'Krus', price: 250, stockQty: 5 });
+    await buy(base, hub, [{ product: mug.id }], { email: 'real@example.com' });
+    await shopSettings(base, admin, { orders: { testMode: true } });
+    const look = browser(base);
+    await look.post('/cart/add', { product: mug.id });
+    assert.match((await look.get('/cart')).text, /Testmodus/, 'buyers see the test banner');
+    await buy(base, hub, [{ product: mug.id, quantity: '2' }], { email: 'test@example.com' });
+    const testOrder = await latest(base, admin);
+    assert.equal(testOrder.number, 'TEST-1');
+    assert.equal(testOrder.test, true);
+    const refund = await api(base, admin, 'POST', `/orders/${testOrder.id}/refund`, { lines: [{ key: testOrder.lines[0].key, quantity: 1 }], restock: false });
+    assert.equal(refund.data.refund.creditNoteNumber, 'TEST-K1', 'credit notes for test orders use their own series');
+    assert.equal((await api(base, admin, 'POST', '/shop/admin/giftcards', { amount: 100 })).status, 201);
+    assert.equal((await api(base, admin, 'GET', '/shop/admin/reports?preset=30d')).data.orders, 1, 'reports count only the real order');
+    assert.doesNotMatch((await api(base, admin, 'GET', '/shop/admin/reports/orders.csv?preset=30d')).data, /TEST-1/);
+
+    const emp = await employee(base, admin);
+    assert.equal((await api(base, emp, 'POST', '/shop/admin/test-data/clear')).status, 403, 'only the owner clears test data');
+    const cleared = (await api(base, admin, 'POST', '/shop/admin/test-data/clear')).data;
+    assert.deepEqual([cleared.orders, cleared.giftcards, cleared.customers], [1, 1, 1]);
+    assert.deepEqual((await api(base, admin, 'GET', '/orders')).data.map((o) => o.number), ['1001']);
+    assert.deepEqual((await api(base, admin, 'GET', '/shop/admin/customers')).data.map((c) => c.email), ['real@example.com']);
+    assert.equal((await api(base, admin, 'GET', '/products')).data.find((p) => p.id === mug.id).stockQty, 4, 'test units go back to stock');
+
+    await shopSettings(base, admin, { orders: { testMode: false } });
+    await buy(base, hub, [{ product: mug.id }], { email: 'next@example.com' });
+    assert.equal((await latest(base, admin)).number, '1002', 'the real series continues without a gap');
+  });
+});

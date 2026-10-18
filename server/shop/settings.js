@@ -153,6 +153,7 @@ export function normalizeShopSettings(raw = {}) {
     orders: {
       numberStart: num(input.orders?.numberStart, 1001, { min: 1, max: 1e9 }),
       prefix: clean(input.orders?.prefix, 10).replace(/[^A-Za-z0-9-]/g, ''),
+      testMode: Boolean(input.orders?.testMode),
     },
     bookings: {
       hours: input.bookings?.hours ? normalizeHours(bookings.hours) : DEFAULT_HOURS,

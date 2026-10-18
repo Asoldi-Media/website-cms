@@ -154,6 +154,18 @@ export function ShopSettingsPanel({ authHeaders, setLoading, isOwner }) {
         <SaveBtn keys={['checkout', 'orders', 'giftcards']} />
       </Card>
 
+      <Card title="Testmodus">
+        <p className="text-sm text-gray-400 mb-3">Test butikken før lansering. Bestillinger får nummer TEST-1, TEST-2 … og telles ikke i rapporter. Skru av før ekte salg, og slett testdataene etterpå.</p>
+        <Check label="Testmodus på (kunder ser et varsel i kassen)" checked={s.orders.testMode} onChange={(v) => sec('orders', { testMode: v })} />
+        <div className="flex flex-wrap gap-2">
+          <SaveBtn keys={['orders']} />
+          <Btn kind="danger" className="mt-4" disabled={!isOwner} onClick={() => act(async () => {
+            const n = await api('POST', '/shop/admin/test-data/clear');
+            window.alert(`Slettet ${n.orders} testordrer, ${n.bookings} timer, ${n.giftcards} gavekort, ${n.subscriptions} abonnementer og ${n.customers} kunder.`);
+          }, { confirm: 'Slette alle testordrer og alt de opprettet? Ekte ordrer røres ikke.' })}>Slett testdata</Btn>
+        </div>
+      </Card>
+
       <Card title="Timebestilling">
         <div className="grid md:grid-cols-4 gap-3 mb-4">
           <Field label="Betaling">

@@ -1,6 +1,6 @@
 # Context for Cursor / developers
 
-This repo is **@damianhch/client-cms** (v2.0.0): the **client-facing CMS package** that gets installed on each client website (e.g. mongsushi.no, or any site built by Asoldi). It is **not** the super-admin; the super-admin lives in the main Asoldi website repo.
+This repo is **@damianhch/client-cms** (v2.1.0): the **client-facing CMS package** that gets installed on each client website (e.g. mongsushi.no, or any site built by Asoldi). It is **not** the super-admin; the super-admin lives in the main Asoldi website repo.
 
 ---
 
@@ -55,7 +55,7 @@ Website Creator's Step 3 writes `cms.site.json` and stamps `data-cms-slot` / `da
 
 - Products: `dataPath/cms/products.json`
 - Categories: `dataPath/cms/categories.json` (menu groups / normal product tabs)
-- Orders: `dataPath/cms/orders.json` (append-only log; cancel via status, never hard-delete)
+- Orders: `dataPath/cms/orders.json` (append-only log; cancel via status, never hard-delete; only `test: true` orders made in shop test mode can be deleted, via `POST /shop/admin/test-data/clear`)
 - Settings: `dataPath/cms/settings.json` (orders view preset: `normal` | `service`)
 - Shared product fields: `id, name, price, comparePrice, contactInsteadOfPrice, description, imageUrl, categoryId, allergens, subtitle, included/bullets, extraTexts, extraOptions, cta, productType, stockQty, soldOut, sortOrder, createdAt, updatedAt`
 - Public read: `GET /api/cms/catalog` (only when hub ecommerce is on)

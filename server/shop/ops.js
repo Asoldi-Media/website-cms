@@ -157,7 +157,7 @@ export function createOps(shop) {
     }
 
     const settings = db.getSettings();
-    const creditNoteNumber = `${settings.orders.prefix}K${db.nextNumber('credit', 1)}`;
+    const creditNoteNumber = order.test ? `TEST-K${db.nextNumber('test-credit', 1)}` : `${settings.orders.prefix}K${db.nextNumber('credit', 1)}`;
     const entry = { id: newId('rf_'), at: new Date().toISOString(), amountMinor: calc.amountMinor, shippingMinor: calc.shippingMinor, lines: calc.lines, reason: String(reason).slice(0, 300), creditNoteNumber, providerRefundId, giftcardMinor: toGiftcard, restocked: restocked.length > 0, by };
     const refundedMinor = order.refundedMinor + calc.amountMinor;
     const full = refundedMinor >= order.totalMinor;

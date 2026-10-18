@@ -21,6 +21,7 @@ function major(value, currency) {
 }
 
 const INTERVALS = { day: 'dag', week: 'uke', month: 'måned', year: 'år' };
+const TEST_BANNER = '<div class="err"><strong>Testmodus:</strong> bestillinger her er bare tester og blir ikke levert.</div>';
 
 /** Page shell for the storefront pages. */
 export function layout({ title, body, siteName, accent = '#111827', cartCount = 0, head = '' }) {
@@ -119,7 +120,7 @@ ${reviews.map((r) => `<div class="review"><span class="stars">${'★'.repeat(r.r
 <label for="rv-n">Navn</label><input id="rv-n" name="name" maxlength="80" required><label for="rv-e">E-post (vises ikke)</label><input id="rv-e" type="email" name="email" maxlength="160" required>
 <label for="rv-t">Omtale</label><textarea id="rv-t" name="text" maxlength="2000" required></textarea><p class="muted small">Omtaler publiseres etter at butikken har godkjent dem.</p><button class="btn" type="submit">Send omtale</button></form></details></div>`
     : '';
-  const body = `${error ? `<div class="err">${esc(error)}</div>` : ''}<div class="grid"><div>${product.imageUrl ? `<img class="hero" src="${esc(chosen.imageUrl || product.imageUrl)}" alt="${esc(product.name)}">` : ''}</div>
+  const body = `${settings.orders.testMode ? TEST_BANNER : ''}${error ? `<div class="err">${esc(error)}</div>` : ''}<div class="grid"><div>${product.imageUrl ? `<img class="hero" src="${esc(chosen.imageUrl || product.imageUrl)}" alt="${esc(product.name)}">` : ''}</div>
 <div><div class="card"><h1>${esc(product.name)}</h1>${product.subtitle ? `<p class="muted">${esc(product.subtitle)}</p>` : ''}
 ${product.kind === 'giftcard' ? '' : priceBlock(product, chosen, currency, now)}
 ${product.kind === 'subscription' && product.subscription.trialDays ? `<p class="muted">${product.subscription.trialDays} dager gratis prøveperiode. Kan sies opp når som helst.</p>` : product.kind === 'subscription' ? '<p class="muted">Fornyes automatisk. Kan sies opp når som helst.</p>' : ''}
@@ -205,7 +206,7 @@ ${buttons.join('')}</form>`
     : !priced.ok
       ? '<p class="err">Rett opp feilene over før du bestiller.</p>'
       : '<p class="muted">Nettbetaling er ikke satt opp ennå. Ta kontakt for å bestille.</p>';
-  const body = `${notice ? `<div class="ok">${esc(notice)}</div>` : ''}${errorList(errors)}
+  const body = `${settings.orders.testMode ? TEST_BANNER : ''}${notice ? `<div class="ok">${esc(notice)}</div>` : ''}${errorList(errors)}
 <div class="grid"><div><div class="card"><h1>Handlekurv</h1><table><thead><tr><th>Vare</th><th class="r">Antall</th><th class="r">Sum</th><th></th></tr></thead><tbody>${linesHtml}</tbody></table>
 <div class="row" style="margin-top:12px"><form method="post" action="/api/cms/cart/code" class="row"><input name="code" placeholder="Rabattkode" maxlength="40" aria-label="Rabattkode"><button class="btn ghost small" type="submit" style="flex:0 0 auto">Bruk</button></form>
 <form method="post" action="/api/cms/cart/giftcard" class="row"><input name="code" placeholder="Gavekortkode" maxlength="40" aria-label="Gavekortkode"><button class="btn ghost small" type="submit" style="flex:0 0 auto">Bruk</button></form></div>

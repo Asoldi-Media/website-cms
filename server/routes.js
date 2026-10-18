@@ -666,7 +666,7 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
     router.get('/orders/stats', adminAuth, attachCmsConfig, (req, res) => {
         const query = req.query || {};
         const rangeQuery = { ...query, range: query.range || 'month' };
-        const filtered = filterOrders(store.getAllOrders(), rangeQuery);
+        const filtered = filterOrders(store.getAllOrders().filter((o) => !o.test), rangeQuery);
         const window = rangeFromPreset(rangeQuery.range, rangeQuery.from, rangeQuery.to);
         res.json({
             ...summarizeOrders(filtered),
@@ -1061,7 +1061,7 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
         });
         let ecommerce = null;
         if (level === 'advanced' || config.features?.ecommerce) {
-            const orders = filterOrders(store.getAllOrders(), {
+            const orders = filterOrders(store.getAllOrders().filter((o) => !o.test), {
                 range: 'custom',
                 from: window.from.toISOString(),
                 to: window.to.toISOString(),

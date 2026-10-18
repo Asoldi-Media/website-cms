@@ -64,7 +64,7 @@ export function createGiftcards({ db }) {
     return card ? { id: card.id, code: card.code, balanceMinor: balanceOf(card), active: card.active, expiresAt: card.expiresAt, currency: card.currency } : null;
   }
 
-  function issue({ amountMinor, currency, validityMonths, orderId = '', orderNumber = '', recipientName = '', recipientEmail = '', message = '', by = 'order' }) {
+  function issue({ amountMinor, currency, validityMonths, orderId = '', orderNumber = '', recipientName = '', recipientEmail = '', message = '', by = 'order', test = false }) {
     const cards = all();
     let code = generateCode();
     while (cards.some((c) => c.code === code)) code = generateCode();
@@ -82,6 +82,7 @@ export function createGiftcards({ db }) {
       message,
       orderId,
       orderNumber,
+      test,
       createdAt: new Date().toISOString(),
       ledger: [{ at: new Date().toISOString(), amountMinor, type: 'issue', ref: orderNumber || by }],
     };

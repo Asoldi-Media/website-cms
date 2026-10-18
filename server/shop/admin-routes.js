@@ -93,7 +93,7 @@ export function mountShopAdmin(router, shop, ops, { adminAuth, ownerAuth, privat
     const settings = db.getSettings();
     const amountMinor = toMinor(req.body?.amount, settings.currency);
     if (!(amountMinor > 0)) return res.status(400).json({ message: 'Beløpet må være større enn 0.' });
-    const card = giftcards.issue({ amountMinor, currency: settings.currency, validityMonths: settings.giftcards.validityMonths, recipientName: clean(req.body?.recipientName, 80), recipientEmail: clean(req.body?.recipientEmail, 160), message: clean(req.body?.message, 300), by: `manuelt: ${actor(req)}` });
+    const card = giftcards.issue({ amountMinor, currency: settings.currency, validityMonths: settings.giftcards.validityMonths, recipientName: clean(req.body?.recipientName, 80), recipientEmail: clean(req.body?.recipientEmail, 160), message: clean(req.body?.message, 300), by: `manuelt: ${actor(req)}`, test: settings.orders.testMode });
     db.audit({ action: 'giftcard-issue', by: actor(req), id: card.id, amountMinor });
     res.status(201).json(publicGiftcard(card));
   });
@@ -198,10 +198,16 @@ export function mountShopAdmin(router, shop, ops, { adminAuth, ownerAuth, privat
     res.json(shop.readCheckouts().filter((c) => !status || c.status === status).slice(-200).reverse().map((c) => ({ ref: c.ref, status: c.status, provider: c.provider, email: c.email, consent: c.consent, amountMinor: c.amountMinor, currency: c.currency, items: (c.priced?.lines || []).map((l) => `${l.quantity} × ${l.name}`), createdAt: c.createdAt, reminderSentAt: c.reminderSentAt || '', orderId: c.orderId || '' })));
   });
 
-  router.get('/shop/admin/reports', adminAuth, (req, res) => res.json(salesReport(store.getAllOrders(), parseRange(req.query))));
-  router.get('/shop/admin/reports/vat', adminAuth, (req, res) => res.json(vatReport(store.getAllOrders(), parseRange(req.query))));
+  const realOrders = () => store.getAllOrders().filter((o) => !o.test);
+  router.get('/shop/admin/reports', adminAuth, (req, res) => res.json(salesReport(realOrders(), parseRange(req.query))));
+  router.get('/shop/admin/reports/vat', adminAuth, (req, res) => res.json(vatReport(realOrders(), parseRange(req.query))));
   router.get('/shop/admin/reports/orders.csv', adminAuth, (req, res) => {
-    res.type('text/csv').set('Content-Disposition', 'attachment; filename="ordrer.csv"').send(ordersCsv(store.getAllOrders(), parseRange(req.query)));
+    res.type('text/csv').set('Content-Disposition', 'attachment; filename="ordrer.csv"').send(ordersCsv(realOrders(), parseRange(req.query)));
+  });
+  router.post('/shop/admin/test-data/clear', ownerAuth, (req, res) => {
+    const counts = shop.clearTestData();
+    db.audit({ action: 'test-data-clear', by: actor(req), ...counts });
+    res.json(counts);
   });
 
   router.get('/shop/admin/products/export.csv', adminAuth, (_req, res) => {
