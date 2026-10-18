@@ -54,7 +54,8 @@ export function ClientCMS() {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [loginError, setLoginError] = useState('');
-    const [tab, setTab] = useState('website');
+    // Stripe/PayPal onboarding returns to /admin?payments=… — open the Payments page.
+    const [tab, setTab] = useState(() => (new URLSearchParams(window.location.search).has('payments') ? 'ecommerce' : 'website'));
     const [features, setFeatures] = useState(DEFAULT_FEATURES);
     const [catalogType, setCatalogType] = useState('normal');
     const [siteName, setSiteName] = useState('');
@@ -334,7 +335,7 @@ export function ClientCMS() {
               <h1 className="text-2xl font-bold text-white mb-6">Social sync</h1>
               <p className="text-gray-400">Reviews and social media sync. Coming soon.</p>
             </div>)}
-          {tab === 'ecommerce' && features.ecommerce && isStaffManager && (<EcommercePanel catalogType={catalogType} authHeaders={authHeaders} loading={loading} setLoading={setLoading}/>)}
+          {tab === 'ecommerce' && features.ecommerce && isStaffManager && (<EcommercePanel catalogType={catalogType} authHeaders={authHeaders} loading={loading} setLoading={setLoading} isOwner={actor.rank === 'admin'}/>)}
           {tab === 'ecommerce' && !features.ecommerce && isStaffManager && (<div className="max-w-4xl">
               <h1 className="text-2xl font-bold text-white mb-4">Products</h1>
               <p className="text-gray-400">Ecommerce is not enabled for this site. Turn it on in the hub, or edit marketing pages under Website.</p>

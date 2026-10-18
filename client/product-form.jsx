@@ -1,6 +1,7 @@
 /** Shared product fields used by the full editor and quick edit. */
 import { useRef, useState } from 'react';
 import { MediaPicker } from './MediaPanel.jsx';
+import { CommerceFields, commerceFromProduct, defaultCommerce } from './ShopCommerceFields.jsx';
 export const PRODUCT_TYPES = [
     { id: 'normal', label: 'Normal' },
     { id: 'menu', label: 'Menu' },
@@ -25,6 +26,7 @@ export function emptyProductForm(catalogType = 'normal') {
         productType: catalogType === 'menu' || catalogType === 'tiers' ? catalogType : 'normal',
         stockQty: '',
         soldOut: false,
+        commerce: defaultCommerce(catalogType),
     };
 }
 /** Form state loaded from a stored product. */
@@ -53,6 +55,7 @@ export function formFromProduct(product, catalogType = 'normal') {
         productType: product?.productType || catalogType || 'normal',
         stockQty: product?.stockQty === 0 || product?.stockQty ? String(product.stockQty) : '',
         soldOut: Boolean(product?.soldOut),
+        commerce: commerceFromProduct(product, catalogType),
     };
 }
 /** Product payload ready for the admin API. */
@@ -66,6 +69,7 @@ export function payloadFromForm(form) {
         return { name, price: price || '' };
     });
     return {
+        ...(form.commerce || {}),
         name: form.name.trim(),
         price: form.contactInsteadOfPrice ? form.price : form.price,
         comparePrice: form.comparePrice.trim(),
@@ -190,5 +194,6 @@ export function ProductFields({ form, setForm, categories, loading, imageUploadi
       <div className="md:col-span-2">
         <ImageDropzone imageUrl={form.imageUrl} uploading={imageUploading} disabled={loading} onUpload={onUpload} onClear={() => setForm((current) => ({ ...current, imageUrl: '' }))} authHeaders={authHeaders} onPickUrl={(url) => setForm((current) => ({ ...current, imageUrl: url }))}/>
       </div>
+      {!compact && authHeaders && form.commerce && (<CommerceFields value={form.commerce} onChange={(commerce) => setForm((current) => ({ ...current, commerce }))} authHeaders={authHeaders}/>)}
     </div>);
 }

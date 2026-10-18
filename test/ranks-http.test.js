@@ -113,12 +113,10 @@ test('analytics and payments admin endpoints persist', async () => {
     const payments = await fetch(`${base}/payments`, {
       method: 'PUT',
       headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        stripe: { enabled: true, connected: true, accountId: 'acct_test' },
-        paypal: { enabled: true, connected: true, merchantId: 'merchant_test' },
-      }),
+      body: JSON.stringify({ stripe: { enabled: false }, paypal: { enabled: true } }),
     }).then((r) => r.json());
-    assert.equal(payments.stripe.accountId, 'acct_test');
-    assert.equal(payments.paypal.merchantId, 'merchant_test');
+    assert.equal(payments.stripe.enabled, false);
+    assert.equal(payments.paypal.enabled, true);
+    assert.equal(payments.linked, false, 'no hub in this test, so nothing can be connected');
   });
 });

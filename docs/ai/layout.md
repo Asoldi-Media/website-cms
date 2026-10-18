@@ -45,10 +45,13 @@ import { ClientCMS } from '@damianhch/client-cms/ClientCMS';
 - `test-posts.js` seeds three published posts when `posts.json` is missing.
 - `data-path.js` picks `~/.asoldi-cms-data/<siteKey>` unless `dataPath` or `CMS_DATA_PATH` is set.
 - `html-tracker.js` and `admin-static.js` serve public HTML and `/admin`.
+- `sso.js` verifies the one-time "Open CMS as Asoldi" token from the hub and keeps `cms/audit.json`.
+- `shop-checkout.js` holds `siteOrigin` and `isBuyable`, shared by the shop routes and `/catalog`.
+- `shop/` is the shop engine (2.0.0). `index.js` (`createShop`) owns checkouts, finalize and webhooks. `pricing.js` is the pure price engine (MVA, shipping, discounts, gift cards; integer øre via `money.js`). `cart.js` is the signed cookie cart. `storefront.js`, `account.js` and `admin-routes.js` mount the public, customer and admin routes. `ops.js` ships and refunds. `pages.js` renders the storefront HTML. `hub-client.js` is the only code that calls the hub's `/api/hub/shop/*`. Shop data lives under `{dataPath}/cms/shop/`.
 
 ## Client modules
 
-`ClientCMS.jsx` is the shell. Panels: products, orders, payments, blog, analytics, email, media, general (pages and inbox), site editor. `admin-main.jsx` is only the Vite entry.
+`ClientCMS.jsx` is the shell. Panels: products, orders, payments, blog, analytics, email, media, general (pages and inbox), site editor. `admin-main.jsx` is only the Vite entry. The shop tab is `EcommercePanel.jsx`; its pages are in `Shop*.jsx`, with shared pieces in `shop-ui.jsx` and product shop fields in `ShopCommerceFields.jsx`.
 
 ## Do not rename
 

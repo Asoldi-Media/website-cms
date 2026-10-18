@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createStore } from '../server/store.js';
 import { isPostPublic, normalizePost } from '../server/blog.js';
 import { verifyAnalyticsDns, publicAnalyticsSnippet } from '../server/analytics.js';
-import { publicPayments } from '../server/payments.js';
+import { normalizePayments } from '../server/payments.js';
 
 test('blog posts schedule then become public without losing author', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'asoldi-blog-'));
@@ -48,14 +48,11 @@ test('analytics DNS verify uses the injected lookup', async () => {
   assert.equal(missing.verified, false);
 });
 
-test('payments public payload stays disconnected without platform keys', () => {
-  delete process.env.STRIPE_SECRET_KEY;
-  delete process.env.STRIPE_CONNECT_CLIENT_ID;
-  const payload = publicPayments({
-    stripe: { enabled: true, connected: false, accountId: '' },
-    paypal: { enabled: false },
+test('local payment switches default on and only keep the enabled flag', () => {
+  const payload = normalizePayments({
+    stripe: { enabled: false, accountId: 'acct_old', connected: true },
+    paypal: {},
   });
-  assert.equal(payload.stripe.platformReady, false);
-  assert.match(payload.stripe.setupHint, /STRIPE_SECRET_KEY/);
-  assert.equal(payload.paypal.platformReady, false);
+  assert.deepEqual(payload.stripe, { enabled: false });
+  assert.deepEqual(payload.paypal, { enabled: true });
 });

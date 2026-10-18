@@ -78,8 +78,9 @@ function catName(product, cats){
 function fillProduct(product, cats){
   var contact=!!(product && product.contactInsteadOfPrice);
   var soldOut=!!(product && product.soldOut);
-  var priceText=contact?'':money(product && product.price);
-  var compare=contact?'':compact(product && product.comparePrice);
+  var v0=product && product.variants && product.variants[0];
+  var priceText=contact?'':money(v0 && v0.price!=null?v0.price:(product && product.price));
+  var compare=contact?'':(v0 && v0.onSale?String(v0.regularPrice):compact(product && product.comparePrice));
   applyWhen(product && product.productType);
   setSlot(document,'product.name',{text:compact(product && product.name)});
   setSlot(document,'product.subtitle',{text:compact(product && product.subtitle),show:!!compact(product && product.subtitle)});
@@ -97,7 +98,8 @@ function fillProduct(product, cats){
   var options=(product && product.extraOptions)||[];
   setSlot(document,'product.extraOptions',{html:options.length?'<ul>'+options.map(function(o){return '<li>'+compact(o.name)+(o.price?' — '+money(o.price):'')+'</li>';}).join('')+'</ul>':'',show:options.length>0});
   var href='/products/'+compact(product && product.id);
-  setSlot(document,'product.cta',{text:compact(product && product.cta)||'Kjøp',href:href,show:!contact});
+  var buyHref=product && product.buyable?'/api/cms/shop/product/'+encodeURIComponent(compact(product.id)):href;
+  setSlot(document,'product.cta',{text:compact(product && product.cta)||'Kjøp',href:buyHref,show:!contact});
   setSlot(document,'product.stockQty',{text:product && product.stockQty!=='' && product.stockQty!=null?String(product.stockQty):'',show:product && product.stockQty!=='' && product.stockQty!=null});
   setSlot(document,'product.soldOut',{text:soldOut?'Utsolgt':'',show:soldOut});
   var cn=catName(product,cats);
@@ -174,7 +176,23 @@ function pickPost(posts){
   }
   return (posts&&posts[0])||null;
 }
+function cartBadge(){
+  var m=document.cookie.match(/(?:^|; )asoldi_cart_count=(\\d+)/);
+  var n=m?Number(m[1]):0;
+  var slots=nodes(document,'cart.count');
+  setSlot(document,'cart.count',{text:String(n),show:n>0});
+  setSlot(document,'cart.link',{href:'/api/cms/cart'});
+  if (slots.length || nodes(document,'cart.link').length || !n || document.getElementById('asoldi-cart-fab')) return;
+  var a=document.createElement('a');
+  a.id='asoldi-cart-fab';
+  a.href='/api/cms/cart';
+  a.setAttribute('aria-label','Handlekurv ('+n+')');
+  a.style.cssText='position:fixed;right:18px;bottom:18px;z-index:2147483000;display:flex;align-items:center;gap:6px;padding:10px 14px;border-radius:999px;background:#111;color:#fff;font:600 15px/1 system-ui,sans-serif;text-decoration:none;box-shadow:0 4px 14px rgba(0,0,0,.25)';
+  a.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.4a2 2 0 0 0 2 1.6h7.6a2 2 0 0 0 2-1.6L21 7H6"/></svg><span>'+n+'</span>';
+  document.body.appendChild(a);
+}
 function run(){
+  cartBadge();
   var kind=kindOf();
   if (!kind) return;
   var catalogP=fetch('/api/cms/catalog',{credentials:'same-origin'}).then(function(r){return r.ok?r.json():{products:[],categories:[]};}).catch(function(){return {products:[],categories:[]};});

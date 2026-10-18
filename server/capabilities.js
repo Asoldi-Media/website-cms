@@ -124,6 +124,8 @@ export const PUBLIC_SITE_ENDPOINTS = Object.freeze([
     { id: 'content.runtime', method: 'GET', path: '/api/cms/content-runtime.js' },
     { id: 'site.hydrator', method: 'GET', path: '/api/cms/site-hydrator.js' },
     { id: 'site.edits.public', method: 'GET', path: '/api/cms/site-edits/public' },
+    { id: 'checkout.page', method: 'GET', path: '/api/cms/checkout?product=:id' },
+    { id: 'checkout.start', method: 'POST', path: '/api/cms/checkout' },
 ]);
 /** Lead schema for list forms, inbox schema otherwise. */
 export function schemaForDestination(destinationType) {

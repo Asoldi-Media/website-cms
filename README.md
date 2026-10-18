@@ -2,7 +2,7 @@
 
 Client CMS for Asoldi client sites: **users**, **typed ecommerce** (menu / tiers / normal), and hub-driven feature flags (users, ecommerce, blog, social sync, analytics). Install in any client project; mount at `/api/cms`, show UI at `/admin`.
 
-Package version: **1.8.5**.
+Package version: **2.0.0**.
 
 Source is plain JavaScript in `server/` and `client/`. Install lines stay `import createCmsRoutes from '@damianhch/client-cms'` and `import { ClientCMS } from '@damianhch/client-cms/ClientCMS'`.
 
@@ -124,7 +124,9 @@ GET /api/cms/catalog
 
 Orders are stored on the client host (`orders.json`) and are not deleted; cancel them with status.
 
-**Payment setup** (Ecommerce → Payment setup) stores Stripe Connect Standard + PayPal seller ids on the host. Live onboarding needs `STRIPE_SECRET_KEY` + `STRIPE_CONNECT_CLIENT_ID`, and `PAYPAL_CLIENT_ID` + `PAYPAL_SECRET`.
+**Payment setup** (Ecommerce → Payment setup, admin rank only) has **Connect Stripe** and **Log in with PayPal** buttons (or a PayPal email fallback). Asoldi (the hub) is the Stripe Connect platform and PayPal partner; the client host holds **no** provider keys. Every call goes server-to-server to `hubUrl/api/hub/shop/*` with the site key (`server/shop-checkout.js`).
+
+**Shop** (since 2.0.0): products with a plain numeric price, not sold out and not "contact instead of price" get `buyable: true` in `/catalog`, and the storefront `product.cta` slot links to the product page `/api/cms/shop/product/<id>`, which adds to the signed cookie cart (`/api/cms/cart`). Checkout prices every line from the stored products (never from the form), adds MVA and shipping, and redirects to Stripe Checkout (direct charge on the seller's account) or PayPal. `GET /checkout/return` asks the hub to verify (Stripe session paid / PayPal capture), checks amount + currency, then writes **one** order (`paymentProvider`, `paymentStatus: paid`, `paymentRef`, `checkoutRef`), lowers `stockQty` and emails the owner through the hub forms pipe. The hub forwards Stripe webhooks to `POST /checkout/notify`, which re-verifies the same way. Pending checkouts live in `cms/checkouts.json`. Currency: `CMS_CURRENCY` (default `nok`).
 
 ---
 

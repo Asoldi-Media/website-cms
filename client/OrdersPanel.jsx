@@ -1,6 +1,9 @@
 /** Admin orders list. Filter and cancel; nothing is hard-deleted. */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ShopOrderDrawer } from './ShopOrderDrawer.jsx';
 const API = '/api/cms';
+const PAY_LABEL = { paid: 'Betalt', partially_refunded: 'Delvis refundert', refunded: 'Refundert', pending: 'Venter' };
+const PROVIDER_LABEL = { stripe: 'Kort', paypal: 'PayPal', giftcard: 'Gavekort', reserve: 'Betal på stedet' };
 const RANGES = [
     { id: 'day', label: 'Last day' },
     { id: 'week', label: 'Last week' },
@@ -77,8 +80,9 @@ function formatWhen(value) {
     return date.toLocaleString();
 }
 /** Orders admin tab. */
-export function OrdersPanel({ catalogType, authHeaders, loading, setLoading }) {
+export function OrdersPanel({ catalogType, authHeaders, loading, setLoading, isOwner }) {
     const [orders, setOrders] = useState([]);
+    const [openOrder, setOpenOrder] = useState(null);
     const [products, setProducts] = useState([]);
     const [stats, setStats] = useState({ count: 0, revenue: 0, average: 0 });
     const [preset, setPreset] = useState(catalogType === 'tiers' ? 'service' : 'normal');
@@ -285,6 +289,7 @@ export function OrdersPanel({ catalogType, authHeaders, loading, setLoading }) {
         <table className="w-full text-left min-w-[800px] text-sm">
           <thead>
             <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-gray-400">
+              <th className="px-4 py-3">Nr.</th>
               <th className="px-4 py-3">Who</th>
               <th className="px-4 py-3">When</th>
               <th className="px-4 py-3">Product</th>
@@ -299,6 +304,12 @@ export function OrdersPanel({ catalogType, authHeaders, loading, setLoading }) {
           </thead>
           <tbody>
             {orders.map((order) => (<tr key={order.id} className="border-b border-white/5">
+                <td className="px-4 py-3">
+                  {order.number ? (<button type="button" onClick={() => setOpenOrder(order)} className="text-[#FF5B00] hover:underline font-medium">
+                      {order.number}
+                    </button>) : (<span className="text-gray-500">—</span>)}
+                  {order.fulfillment?.status && order.fulfillment.status !== 'fulfilled' && order.paymentStatus === 'paid' && (<div className="text-xs text-yellow-200">Skal sendes</div>)}
+                </td>
                 <td className="px-4 py-3 text-white">
                   <div>{order.customerName || '—'}</div>
                   <div className="text-gray-400 text-xs">{order.customerEmail}</div>
@@ -307,7 +318,11 @@ export function OrdersPanel({ catalogType, authHeaders, loading, setLoading }) {
                 <td className="px-4 py-3 text-gray-300">{formatWhen(order.purchasedAt)}</td>
                 <td className="px-4 py-3 text-gray-300">
                   <div>{order.productName}</div>
-                  <div className="text-gray-500 text-xs">{order.productId}</div>
+                  <div className="text-gray-500 text-xs">
+                    {order.lines?.length
+                ? order.lines.map((l) => `${l.quantity}× ${l.name}${l.variantLabel ? ` (${l.variantLabel})` : ''}`).join(', ')
+                : order.productId}
+                  </div>
                 </td>
                 {visibleColumns.includes('booking') && (<td className="px-4 py-3 text-gray-300">
                     {order.bookingFrom || order.bookingTo
@@ -315,7 +330,12 @@ export function OrdersPanel({ catalogType, authHeaders, loading, setLoading }) {
                     : '—'}
                   </td>)}
                 {visibleColumns.includes('qty') && <td className="px-4 py-3 text-gray-300">{order.quantity}</td>}
-                <td className="px-4 py-3 text-gray-300">{formatMoney(order.amount, order.currency)}</td>
+                <td className="px-4 py-3 text-gray-300">
+                  {formatMoney(order.amount, order.currency)}
+                  {PAY_LABEL[order.paymentStatus] && (<div className={`text-xs ${order.paymentStatus === 'paid' ? 'text-green-300' : 'text-yellow-200'}`}>
+                      {PAY_LABEL[order.paymentStatus]} · {PROVIDER_LABEL[order.paymentProvider] || order.paymentProvider}
+                    </div>)}
+                </td>
                 {visibleColumns.includes('ship') && (<td className="px-4 py-3 text-gray-400">
                     {[order.shippingAddress?.line, order.shippingAddress?.postal, order.shippingAddress?.city]
                     .filter(Boolean)
@@ -343,5 +363,6 @@ export function OrdersPanel({ catalogType, authHeaders, loading, setLoading }) {
         </table>
         {orders.length === 0 && (<p className="px-4 py-8 text-gray-400 text-center">No orders stored yet. Add one to start the log — it stays on this host.</p>)}
       </div>
+      {openOrder && (<ShopOrderDrawer order={openOrder} authHeaders={authHeaders} setLoading={setLoading} isOwner={isOwner} onClose={() => setOpenOrder(null)} onChanged={() => Promise.all([fetchOrders(), fetchStats()])}/>)}
     </div>);
 }

@@ -19,7 +19,14 @@ import { createAnalyticsEventStore } from './analytics-events.js';
 import { analyticsTrackerScript, rangeFromPreset as analyticsRangeFromPreset, summarizeTrafficEvents } from './analytics-tracker.js';
 import { summarizeCta, summarizeEcommerceFunnel, summarizeShopifyCommerce, normalizeAnalyticsPath } from './analytics-insights.js';
 import { setPublicAnalyticsEnabled } from './analytics-flag.js';
-import { publicPayments } from './payments.js';
+import { isBuyable, siteOrigin } from './shop-checkout.js';
+import { createShop } from './shop/index.js';
+import { mountStorefront } from './shop/storefront.js';
+import { createOps } from './shop/ops.js';
+import { mountAccount } from './shop/account.js';
+import { mountShopAdmin, mountPayments } from './shop/admin-routes.js';
+import { formatMoney } from './shop/money.js';
+import { createSsoVerifier, ssoLandingHtml, SSO_SESSION_MS } from './sso.js';
 import { createEmailTemplateStore, mergeFieldsMeta, shouldSeedAsoldiPresets } from './email-templates.js';
 import { loadSiteSeed } from './site-seed.js';
 import { isLocalCmsOpenRequest, localDevInboxForm, LOCAL_DEV_INBOX_FORM_ID } from './local-open.js';
@@ -101,6 +108,7 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
     const analyticsEvents = createAnalyticsEventStore(resolvedDataPath);
     const emailTemplates = createEmailTemplateStore(resolvedDataPath);
     const siteEdits = createSiteEditsStore(resolvedDataPath);
+    const sso = createSsoVerifier({ dataPath: resolvedDataPath, siteKey });
     /** Step 3 seed: lists are created once (ids kept); forms and pages stay read-only. */
     const siteSeed = loadSiteSeed({ siteSeed: siteSeedInput, siteSeedPath });
     const seedListIdMap = store.seedLists(siteSeed.lists);
@@ -220,7 +228,7 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
             const auth = req.headers.authorization;
             const token = auth && auth.startsWith('Bearer ') ? auth.slice(7) : null;
             const payload = token ? verifyToken(token) : null;
-            if (!payload) {
+            if (!payload || (payload.exp && Date.now() > Number(payload.exp))) {
                 res.status(401).json({ message: 'Unauthorized' });
                 return;
             }
@@ -249,6 +257,29 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
     const adminAuth = allow('employee');
     const blogAuth = allow('employee', 'writer');
     const anyAuth = allow('employee', 'writer', 'member');
+    const PAID_VIA = { stripe: 'kort/Stripe', paypal: 'PayPal', giftcard: 'gavekort', reserve: 'betales på stedet' };
+    const shop = createShop({
+        store,
+        dataPath: resolvedDataPath,
+        hubUrl,
+        siteKey,
+        adminSecret,
+        getSiteName: async () => (await fetchHubConfig()).name || siteSeed.name || '',
+        notifyOwner: (order, { lowStock = [], message = '' } = {}) => {
+            if (!order)
+                return forwardToHub({ id: 'shop-notice', label: 'Nettbutikk', purpose: 'order' }, { name: 'Nettbutikk', message }, {}, '/api/cms/shop');
+            const lines = order.lines.map((l) => `${l.quantity} × ${l.name}${l.variantLabel ? ` (${l.variantLabel})` : ''}${l.booking ? ` – ${new Date(l.booking.start).toLocaleString('nb-NO', { timeZone: 'Europe/Oslo' })}` : ''}`);
+            const low = lowStock.map((x) => `${x.name}${x.variantLabel ? ` (${x.variantLabel})` : ''}: ${x.qty} igjen`);
+            return forwardToHub({ id: 'shop-order', label: order.paymentProvider === 'reserve' ? 'Ny booking (betales på stedet)' : 'Ny nettbestilling (betalt)', purpose: 'order' }, {
+                name: order.customerName,
+                email: order.customerEmail,
+                phone: order.customerPhone,
+                message: `Ordre #${order.number}\n${lines.join('\n')}\nTotalt ${formatMoney(order.totalMinor, order.currency)} (${PAID_VIA[order.paymentProvider] || order.paymentProvider})${order.customNote ? `\n\n${order.customNote}` : ''}${low.length ? `\n\nLite på lager:\n${low.join('\n')}` : ''}`,
+            }, {}, '/api/cms/checkout');
+        },
+    });
+    const shopOps = createOps(shop);
+    const privateDir = join(resolvedDataPath, 'cms', 'private');
     function attachCmsConfig(req, res, next) {
         fetchHubConfig()
             .then((config) => {
@@ -346,11 +377,13 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
             return;
         }
         const catalogType = resolveCatalogType(config.ecommerceCatalogType || siteSeed.catalog?.catalogType);
+        const checkout = (await shop.readyProviders()).length > 0;
         res.json({
             catalogType,
             name: config.name,
+            checkout,
             categories: store.getAllCategories().map(publicCategory),
-            products: products.map(publicProduct),
+            products: products.map((product) => ({ ...publicProduct(product), buyable: checkout && isBuyable(product) })),
         });
     });
     router.get('/admin/local-open', (req, res) => {
@@ -367,6 +400,21 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
         const token = signToken({ role: 'admin', username, rank: 'admin', at: Date.now(), local: true });
         res.json({ token, rank: 'admin', username, name: username, local: true });
         return;
+    });
+    router.get('/admin/sso', (req, res) => {
+        res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+        const result = sso.verify(req.query.token);
+        if (!result.ok) {
+            res.status(result.reason === 'not-linked' ? 404 : 401).type('html').send('<!doctype html><meta charset="utf-8"><p>Innloggingslenken er brukt eller utløpt. Åpne CMS på nytt fra Asoldi.</p>');
+            return;
+        }
+        const at = Date.now();
+        const token = signToken({ role: 'admin', username: 'asoldi-support', rank: 'admin', at, exp: at + SSO_SESSION_MS, sso: true, by: result.by });
+        sso.audit({ action: 'sso-login', by: result.by, ip: String(req.get('x-forwarded-for') || req.ip || '').split(',')[0].trim() });
+        res.type('html').send(ssoLandingHtml(token));
+    });
+    router.get('/admin/audit', allow(), (_req, res) => {
+        res.json(sso.auditLog().slice(-100).reverse());
     });
     router.post('/admin/login', async (req, res) => {
         const { username, password } = req.body || {};
@@ -1046,12 +1094,9 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
             settings: store.getAnalytics({ domain: config.domain || '' }),
         });
     });
-    router.get('/payments', adminAuth, (_req, res) => {
-        res.json(publicPayments(store.getPayments()));
-    });
-    router.put('/payments', adminAuth, (req, res) => {
-        const next = store.writePayments(req.body || {});
-        res.json(publicPayments(next));
-    });
+    mountPayments(router, shop, { adminAuth, ownerAuth: allow(), siteOrigin });
+    mountStorefront(router, shop, { siteOrigin });
+    mountAccount(router, shop, shopOps, { siteOrigin, privateDir });
+    mountShopAdmin(router, shop, shopOps, { adminAuth, ownerAuth: allow(), privateDir });
     return router;
 }

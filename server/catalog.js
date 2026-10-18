@@ -1,4 +1,5 @@
 /** Product and category fields shared by the store and GET /api/cms/catalog. */
+import { normalizeCommerceFields, publicCommerce } from './shop/product.js';
 export const CATALOG_TYPES = ['menu', 'tiers', 'normal'];
 export const DEFAULT_FEATURES = {
     users: true,
@@ -108,7 +109,9 @@ export function normalizeProduct(raw, { defaultProductType = null } = {}) {
     const included = normalizeStringList(raw.included?.length ? raw.included : raw.bullets);
     const soldOut = Boolean(raw.soldOut);
     const stockQty = soldOut ? 0 : normalizeStockQty(raw.stockQty);
+    const productType = normalizeCatalogType(raw.productType || raw.layout) || (defaultProductType ? resolveCatalogType(defaultProductType) : '');
     return {
+        ...normalizeCommerceFields(raw, productType),
         id: String(raw.id || ''),
         name: String(raw.name || raw.title || ''),
         price: normalizePrice(raw.price),
@@ -124,7 +127,7 @@ export function normalizeProduct(raw, { defaultProductType = null } = {}) {
         extraTexts: normalizeStringList(raw.extraTexts),
         extraOptions: normalizeExtraOptions(raw.extraOptions),
         cta: String(raw.cta || ''),
-        productType: normalizeCatalogType(raw.productType || raw.layout) || (defaultProductType ? resolveCatalogType(defaultProductType) : ''),
+        productType,
         stockQty,
         soldOut,
         sortOrder: Number.isFinite(Number(raw.sortOrder)) ? Number(raw.sortOrder) : 0,
@@ -150,6 +153,7 @@ export function publicProduct(product) {
     if (!product)
         return null;
     return {
+        ...publicCommerce(product),
         id: product.id,
         name: product.name,
         price: product.price,

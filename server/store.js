@@ -10,6 +10,7 @@ import { normalizeRank, publicUser } from './ranks.js';
 import { normalizeAnalytics } from './analytics.js';
 import { normalizePayments } from './payments.js';
 import { normalizeSubmission } from './forms.js';
+import { appendPriceLog } from './shop/product.js';
 const SALT_ROUNDS = 12;
 /** CMS JSON store for one site data directory. */
 export function createStore(dataPath) {
@@ -319,6 +320,7 @@ export function createStore(dataPath) {
                 createdAt: now,
                 updatedAt: now,
             }, { defaultProductType: input?.productType || input?.defaultProductType || 'normal' });
+            product.priceLog = appendPriceLog(null, product);
             products.push(product);
             writeProducts(products);
             return { ok: true, product };
@@ -339,6 +341,7 @@ export function createStore(dataPath) {
             });
             if (!String(next.name || '').trim())
                 return { ok: false, error: 'Product name is required' };
+            next.priceLog = appendPriceLog(current, next);
             products[i] = next;
             writeProducts(products);
             return { ok: true, product: products[i] };
