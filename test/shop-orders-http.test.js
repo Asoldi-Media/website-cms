@@ -210,6 +210,8 @@ test('TM-1 test mode: TEST- numbers, kept out of reports, cleared without touchi
     assert.equal((await api(base, admin, 'GET', '/shop/admin/reports?preset=30d')).data.orders, 1, 'reports count only the real order');
     assert.doesNotMatch((await api(base, admin, 'GET', '/shop/admin/reports/orders.csv?preset=30d')).data, /TEST-1/);
 
+    const testBuyer = (await api(base, admin, 'GET', '/shop/admin/customers')).data.find((c) => c.email === 'test@example.com');
+    await api(base, admin, 'PUT', `/shop/admin/customers/${testBuyer.id}`, { note: 'notert under testen' });
     const emp = await employee(base, admin);
     assert.equal((await api(base, emp, 'POST', '/shop/admin/test-data/clear')).status, 403, 'only the owner clears test data');
     const cleared = (await api(base, admin, 'POST', '/shop/admin/test-data/clear')).data;

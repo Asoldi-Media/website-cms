@@ -519,9 +519,10 @@ export function createShop({ store, dataPath, hubUrl, siteKey, adminSecret, getS
       .map((c) => {
         if (!c.orderIds.some((id) => ids.has(id))) return c;
         const orderIds = c.orderIds.filter((id) => remaining.has(id));
-        return { ...c, orderIds, totalSpentMinor: orderIds.reduce((s, id) => s + remaining.get(id).totalMinor, 0) };
+        // Customers only come from orders, so one with no real order left was made by the test, notes included.
+        return orderIds.length ? { ...c, orderIds, totalSpentMinor: orderIds.reduce((s, id) => s + remaining.get(id).totalMinor, 0) } : null;
       })
-      .filter((c) => c.orderIds.length || c.note || c.tags?.length);
+      .filter(Boolean);
     counts.customers = customers.length - keptCustomers.length;
     db.save('customers', keptCustomers);
     writeCheckouts(readCheckouts().filter((c) => !ids.has(c.orderId)));
