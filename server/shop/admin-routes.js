@@ -144,8 +144,9 @@ export function mountShopAdmin(router, shop, ops, { adminAuth, ownerAuth, privat
       const problem = shop.bookings.check(product, booking, Math.max(1, Number(req.body?.quantity) || 1), { anyTime: true });
       if (problem) return res.status(409).json({ message: problem });
     }
-    const staff = db.getSettings().bookings.staff.find((s) => s.id === booking.staffId);
-    const row = { id: newId('bk_'), ref: '', orderId: '', orderNumber: '', productId: product.id, productName: product.name, staffId: booking.staffId, staffName: staff?.name || '', start: booking.start, end: booking.end, quantity: Math.max(1, Number(req.body?.quantity) || 1), status: 'confirmed', paid: Boolean(req.body?.paid), amountMinor: 0, customerName: clean(req.body?.customerName, 120), customerEmail: clean(req.body?.customerEmail, 160).toLowerCase(), customerPhone: clean(req.body?.customerPhone, 40), note: clean(req.body?.note, 500), source: 'admin', createdAt: new Date().toISOString() };
+    const settings = db.getSettings();
+    const staff = settings.bookings.staff.find((s) => s.id === booking.staffId);
+    const row = { id: newId('bk_'), ref: '', orderId: '', orderNumber: '', productId: product.id, productName: product.name, staffId: booking.staffId, staffName: staff?.name || '', start: booking.start, end: booking.end, quantity: Math.max(1, Number(req.body?.quantity) || 1), status: 'confirmed', paid: Boolean(req.body?.paid), amountMinor: 0, customerName: clean(req.body?.customerName, 120), customerEmail: clean(req.body?.customerEmail, 160).toLowerCase(), customerPhone: clean(req.body?.customerPhone, 40), note: clean(req.body?.note, 500), source: 'admin', test: settings.orders.testMode, createdAt: new Date().toISOString() };
     res.status(201).json(db.upsert('bookings', row));
   });
   router.put('/shop/admin/bookings/:id', adminAuth, (req, res) => {

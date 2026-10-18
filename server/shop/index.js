@@ -505,7 +505,7 @@ export function createShop({ store, dataPath, hubUrl, siteKey, adminSecret, getS
     const counts = { orders: store.deleteOrders([...ids]) };
     for (const name of ['bookings', 'downloads', 'subscriptions']) {
       const rows = db.list(name);
-      const kept = rows.filter((r) => !ids.has(r.orderId));
+      const kept = rows.filter((r) => !r.test && !ids.has(r.orderId));
       counts[name] = rows.length - kept.length;
       db.save(name, kept);
     }

@@ -205,13 +205,15 @@ test('TM-1 test mode: TEST- numbers, kept out of reports, cleared without touchi
     const refund = await api(base, admin, 'POST', `/orders/${testOrder.id}/refund`, { lines: [{ key: testOrder.lines[0].key, quantity: 1 }], restock: false });
     assert.equal(refund.data.refund.creditNoteNumber, 'TEST-K1', 'credit notes for test orders use their own series');
     assert.equal((await api(base, admin, 'POST', '/shop/admin/giftcards', { amount: 100 })).status, 201);
+    const cut = await createProduct(base, admin, { name: 'Klipp', price: 300, kind: 'booking', requiresShipping: false });
+    assert.equal((await api(base, admin, 'POST', '/shop/admin/bookings', { productId: cut.id, start: new Date(Date.now() + 3 * 86_400_000).toISOString(), force: true, customerName: 'Telefon' })).status, 201);
     assert.equal((await api(base, admin, 'GET', '/shop/admin/reports?preset=30d')).data.orders, 1, 'reports count only the real order');
     assert.doesNotMatch((await api(base, admin, 'GET', '/shop/admin/reports/orders.csv?preset=30d')).data, /TEST-1/);
 
     const emp = await employee(base, admin);
     assert.equal((await api(base, emp, 'POST', '/shop/admin/test-data/clear')).status, 403, 'only the owner clears test data');
     const cleared = (await api(base, admin, 'POST', '/shop/admin/test-data/clear')).data;
-    assert.deepEqual([cleared.orders, cleared.giftcards, cleared.customers], [1, 1, 1]);
+    assert.deepEqual([cleared.orders, cleared.giftcards, cleared.customers, cleared.bookings], [1, 1, 1, 1], 'hand-made test bookings go too');
     assert.deepEqual((await api(base, admin, 'GET', '/orders')).data.map((o) => o.number), ['1001']);
     assert.deepEqual((await api(base, admin, 'GET', '/shop/admin/customers')).data.map((c) => c.email), ['real@example.com']);
     assert.equal((await api(base, admin, 'GET', '/products')).data.find((p) => p.id === mug.id).stockQty, 4, 'test units go back to stock');
