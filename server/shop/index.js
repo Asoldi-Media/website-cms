@@ -228,7 +228,7 @@ export function createShop({ store, dataPath, hubUrl, siteKey, adminSecret, getS
       customerEmail: email,
       customerPhone: payment.customerPhone || checkout.phone || '',
       customNote: checkout.note || '',
-      shippingAddress: payment.shippingAddressParts || { line: payment.shippingAddress || '' },
+      shippingAddress: payment.shippingAddressParts || checkout.address || { line: payment.shippingAddress || '' },
       country: checkout.country,
       consent: Boolean(checkout.consent),
       status: 'new',

@@ -193,10 +193,13 @@ ${ship.methods.length ? `<label>Fraktmåte</label>${ship.methods.map((m) => `<la
     if (reserveOk) buttons.push(`<button class="btn block ghost" type="submit" name="provider" value="reserve">Reserver time (betal ved oppmøte)</button>`);
   }
   const needsEmail = zeroToPay || reserveOk;
+  const needsAddress = zeroToPay && ship.required && ship.method?.type !== 'pickup';
   const checkout = priced.ok && buttons.length
     ? `<form method="post" action="/api/cms/checkout">
 <label for="email">E-post${needsEmail ? '' : ' (valgfritt – fylles ellers inn på betalingssiden)'}</label><input id="email" type="email" name="email" value="${esc(cart.email)}" maxlength="160"${needsEmail ? ' required' : ''}>
-${reserveOk ? '<label for="name">Navn</label><input id="name" name="name" maxlength="120"><label for="phone">Telefon</label><input id="phone" name="phone" maxlength="40">' : ''}
+${reserveOk || needsAddress ? `<label for="name">Navn</label><input id="name" name="name" maxlength="120"${needsAddress ? ' required' : ''}>` : ''}
+${reserveOk ? '<label for="phone">Telefon</label><input id="phone" name="phone" maxlength="40">' : ''}
+${needsAddress ? '<label for="line">Leveringsadresse</label><input id="line" name="line" maxlength="160" autocomplete="street-address" required><label for="postal">Postnummer</label><input id="postal" name="postal" maxlength="12" autocomplete="postal-code" required><label for="city">Sted</label><input id="city" name="city" maxlength="80" autocomplete="address-level2" required>' : ''}
 <label for="note">Melding til butikken (valgfritt)</label><textarea id="note" name="note" maxlength="500">${esc(cart.note)}</textarea>
 ${settings.checkout.reminderConsent ? `<label class="check"><input type="checkbox" name="consent" value="1"${cart.consent ? ' checked' : ''}> <span class="small">${esc(settings.checkout.reminderText)}</span></label>` : ''}
 <div class="card" style="background:#fafaf8;margin:12px 0 0"><p class="small">${esc(settings.checkout.termsText)}${settings.checkout.termsUrl ? ` <a href="${esc(settings.checkout.termsUrl)}" target="_blank" rel="noopener">Les salgsbetingelsene</a>` : ''}</p>

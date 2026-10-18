@@ -2,7 +2,7 @@
 
 Client CMS for Asoldi client sites: **users**, **typed ecommerce** (menu / tiers / normal), and hub-driven feature flags (users, ecommerce, blog, social sync, analytics). Install in any client project; mount at `/api/cms`, show UI at `/admin`.
 
-Package version: **2.1.1**.
+Package version: **2.1.2**.
 
 Source is plain JavaScript in `server/` and `client/`. Install lines stay `import createCmsRoutes from '@damianhch/client-cms'` and `import { ClientCMS } from '@damianhch/client-cms/ClientCMS'`.
 

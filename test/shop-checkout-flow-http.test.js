@@ -299,7 +299,9 @@ test('CK-9 gift cards: sell → code emailed to recipient → redeem as payment 
     assert.equal(priced.amountDueMinor, 0);
     const cartHtml = (await b.get('/cart')).text;
     assert.match(cartHtml, /value="giftcard"/);
-    const pay = await b.post('/checkout', { provider: 'giftcard', terms: '1', email: 'per@example.com' });
+    assert.match(cartHtml, /name="line"[^>]*required/, 'no payment page will ask for the delivery address, so the cart must');
+    assert.equal((await b.post('/checkout', { provider: 'giftcard', terms: '1', email: 'per@example.com' })).status, 400);
+    const pay = await b.post('/checkout', { provider: 'giftcard', terms: '1', email: 'per@example.com', name: 'Per Hansen', line: 'Storgata 1', postal: '0155', city: 'Oslo' });
     assert.equal(pay.status, 303);
     assert.match(pay.location, /\/api\/cms\/checkout\/return\?ref=chk_/);
     const done = await b.get(pay.location.replace('/api/cms', ''));
@@ -308,6 +310,7 @@ test('CK-9 gift cards: sell → code emailed to recipient → redeem as payment 
     assert.equal(after.balanceMinor, 38000);
     const order = (await orders(base, admin)).find((o) => o.paymentProvider === 'giftcard');
     assert.equal(order.giftcardPayments[0].amountMinor, 12000);
+    assert.deepEqual([order.customerName, order.shippingAddress], ['Per Hansen', { line: 'Storgata 1', postal: '0155', city: 'Oslo', country: 'NO' }]);
     assert.equal(hub.sessions.size, 1, 'no provider checkout for a fully covered order');
 
     const limited = browser(base);

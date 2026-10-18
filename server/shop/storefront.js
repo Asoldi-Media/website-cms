@@ -286,9 +286,14 @@ export function mountStorefront(router, shop, { siteOrigin }) {
     const email = cart.email;
     const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
     const consent = Boolean(settings.checkout.reminderConsent && cart.consent && validEmail);
+    const ship = priced.shipping;
+    const collectShipping = ship.required && ship.method?.type !== 'pickup';
+    // Card and PayPal collect the delivery address on their own page; nothing else does.
+    const address = provider === 'giftcard' && collectShipping ? { line: clean(body.line, 160), postal: clean(body.postal, 12), city: clean(body.city, 80), country: priced.country } : null;
     if (provider === 'giftcard') {
       if (priced.amountDueMinor > 0 || !priced.giftcardPayments.length) return fail(400, 'Gavekortet dekker ikke hele beløpet.');
       if (!validEmail) return fail(400, 'Skriv inn e-postadressen din.');
+      if (address && !(clean(body.name, 120) && address.line && address.postal && address.city)) return fail(400, 'Skriv inn navn og leveringsadresse.');
     } else if (provider === 'reserve') {
       if (!onlyBookings || settings.bookings.payMode === 'prepay') return fail(400, 'Denne bestillingen må betales på nett.');
       if (!validEmail) return fail(400, 'Skriv inn e-postadressen din.');
@@ -316,14 +321,13 @@ export function mountStorefront(router, shop, { siteOrigin }) {
       email,
       name: clean(body.name, 120),
       phone: clean(body.phone, 40),
+      address,
       consent,
       note: cart.note,
       createdAt: new Date().toISOString(),
       holdExpiresAt,
     });
     if (provider === 'giftcard' || provider === 'reserve') return res.redirect(303, `/api/cms/checkout/return?ref=${ref}`);
-    const ship = priced.shipping;
-    const collectShipping = ship.required && ship.method?.type !== 'pickup';
     try {
       const created = await shop.hub.call('POST', provider === 'stripe' ? '/api/hub/shop/stripe/checkout' : '/api/hub/shop/paypal/order', {
         ref,
