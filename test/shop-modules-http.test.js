@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { api, shopSettings, withShop } from './_shop-harness.js';
+import { shopModulesFrom, visibleShopPages } from '../client/shop-modules.js';
+
+const menu = (modules) => visibleShopPages(shopModulesFrom(modules)).map((page) => page.label);
 
 /** A 2.1.x shop: discounts and bookings in use, settings saved before modules existed. */
 function seedLegacyShop(root) {
@@ -18,6 +21,7 @@ test('a shop saved before modules existed shows every module, and its data is un
     const settings = await api(base, admin, 'GET', '/shop/admin/settings');
     assert.equal(settings.status, 200);
     assert.deepEqual(settings.data.modules, { bookings: true, discounts: true, giftcards: true, subscriptions: true, reviews: true, abandoned: true });
+    assert.deepEqual(menu(settings.data.modules), ['Timer', 'Rabatter', 'Gavekort', 'Abonnement', 'Omtaler', 'Forlatte kasser'], 'the admin menu lists every page');
     assert.equal(settings.data.seller.legalName, 'Kafé AS');
     const discounts = await api(base, admin, 'GET', '/shop/admin/discounts');
     assert.equal(discounts.status, 200);
@@ -30,6 +34,7 @@ test('switching a module off is saved and survives other settings saves', async 
     const saved = await shopSettings(base, admin, { modules: { reviews: false } });
     assert.equal(saved.modules.reviews, false);
     assert.equal(saved.modules.discounts, true);
+    assert.equal(menu(saved.modules).includes('Omtaler'), false, 'Omtaler leaves the admin menu');
     const again = await shopSettings(base, admin, { seller: { legalName: 'Nytt navn AS' } });
     assert.equal(again.modules.reviews, false, 'an explicit false stays off');
     assert.equal(again.modules.bookings, true);

@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import { Users, LogOut, LayoutDashboard, BarChart3, ShoppingBag, ShoppingCart, Package, Newspaper, Mail, Inbox, Image as ImageIcon, Pencil, Calendar, Percent, Gift, RefreshCw, Star, Settings, FileText } from 'lucide-react';
 import { PagesPanel } from './PagesPanel.jsx';
+import { NO_SHOP_MODULES, shopModulesFrom, shopPageBlocked, visibleShopPages } from './shop-modules.js';
 import { Helmet } from 'react-helmet-async';
 import './cms-look.css';
 import { ShopFilesPanel, ShopSettingsPanel } from './ShopSettingsPanel.jsx';
@@ -34,15 +35,7 @@ const SHOP_MAIN = [
     { id: 'products', label: 'Produkter', icon: Package },
     { id: 'customers', label: 'Kunder', icon: Users },
 ];
-const SHOP_EXTRA = [
-    { id: 'bookings', label: 'Timer', icon: Calendar },
-    { id: 'discounts', label: 'Rabatter', icon: Percent },
-    { id: 'giftcards', label: 'Gavekort', icon: Gift },
-    { id: 'subscriptions', label: 'Abonnement', icon: RefreshCw },
-    { id: 'reviews', label: 'Omtaler', icon: Star },
-    { id: 'abandoned', label: 'Forlatte kasser', icon: ShoppingBag },
-];
-const EMPTY_MODULES = { bookings: false, discounts: false, giftcards: false, subscriptions: false, reviews: false, abandoned: false };
+const SHOP_EXTRA_ICONS = { bookings: Calendar, discounts: Percent, giftcards: Gift, subscriptions: RefreshCw, reviews: Star, abandoned: ShoppingBag };
 function SideLink({ icon: Icon, label, active, onClick }) {
     return (<button type="button" onClick={onClick} className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-left text-[13px] font-medium ${active ? 'bg-[#f1f2f4] text-[#111]' : 'text-[#303030] hover:bg-[#f6f6f7]'}`}>
       <Icon size={16} strokeWidth={1.75} className={active ? 'text-[#FF5B00] shrink-0' : 'text-[#6d7175] shrink-0'}/>
@@ -87,7 +80,7 @@ export function ClientCMS() {
     const [shopPage, setShopPage] = useState('overview');
     const [settingsPage, setSettingsPage] = useState(() => (new URLSearchParams(window.location.search).has('payments') ? 'payments' : 'features'));
     const [editorRoute, setEditorRoute] = useState('');
-    const [modules, setModules] = useState(EMPTY_MODULES);
+    const [modules, setModules] = useState(NO_SHOP_MODULES);
     const [features, setFeatures] = useState(DEFAULT_FEATURES);
     const [catalogType, setCatalogType] = useState('normal');
     const [siteName, setSiteName] = useState('');
@@ -167,8 +160,8 @@ export function ClientCMS() {
         fetch(`${API}/shop/admin/settings`, { headers: authHeaders() })
             .then((r) => (r.ok ? r.json() : null))
             .then((data) => {
-            if (data?.modules)
-                setModules({ ...EMPTY_MODULES, ...data.modules });
+            if (data && typeof data === 'object')
+                setModules(shopModulesFrom(data.modules));
         })
             .catch(() => {});
     }, [loggedIn, features.ecommerce]);
@@ -326,7 +319,7 @@ export function ClientCMS() {
         setTab('ecommerce');
         setShopPage(id);
     };
-    const shopBlocked = SHOP_EXTRA.some((item) => item.id === shopPage) && !modules[shopPage];
+    const shopBlocked = shopPageBlocked(shopPage, modules);
     const settingsItems = [
         features.ecommerce && ['features', 'Features'],
         features.ecommerce && ['store', 'Store'],
@@ -353,7 +346,7 @@ export function ClientCMS() {
             {features.ecommerce && isStaffManager && (<>
               <SideLabel>Shop</SideLabel>
               {SHOP_MAIN.map((item) => (<SideLink key={item.id} icon={item.icon} label={item.label} active={tab === 'ecommerce' && shopPage === item.id} onClick={() => openShop(item.id)}/>))}
-              {SHOP_EXTRA.filter((item) => modules[item.id]).map((item) => (<SideLink key={item.id} icon={item.icon} label={item.label} active={tab === 'ecommerce' && shopPage === item.id} onClick={() => openShop(item.id)}/>))}
+              {visibleShopPages(modules).map((item) => (<SideLink key={item.id} icon={SHOP_EXTRA_ICONS[item.id]} label={item.label} active={tab === 'ecommerce' && shopPage === item.id} onClick={() => openShop(item.id)}/>))}
             </>)}
             {(isStaffManager || canBlog || (features.blog && canBlog) || (features.emailMarketing && isStaffManager)) ? <SideLabel>Content</SideLabel> : null}
             {isStaffManager && <SideLink icon={Pencil} label="Website" active={tab === 'website'} onClick={() => setTab('website')}/>}
@@ -391,7 +384,7 @@ export function ClientCMS() {
                 {settingsItems.map(([id, label]) => (<button key={id} type="button" onClick={() => setSettingsPage(id)} className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[13px] font-medium ${settingsPage === id ? 'bg-[#f1f2f4] text-[#111]' : 'text-[#4a4a4a] hover:bg-[#f6f6f7]'}`}>{label}</button>))}
               </nav>
               <div className="flex-1 min-w-0">
-                {features.ecommerce && ['features', 'store', 'shipping', 'tax', 'checkout', 'bookings', 'test'].includes(settingsPage) && (<ShopSettingsPanel authHeaders={authHeaders} setLoading={setLoading} isOwner={rank === 'admin'} section={settingsPage} onSaved={(next) => next?.modules && setModules({ ...EMPTY_MODULES, ...next.modules })}/>)}
+                {features.ecommerce && ['features', 'store', 'shipping', 'tax', 'checkout', 'bookings', 'test'].includes(settingsPage) && (<ShopSettingsPanel authHeaders={authHeaders} setLoading={setLoading} isOwner={rank === 'admin'} section={settingsPage} onSaved={(next) => next?.modules && setModules(shopModulesFrom(next.modules))}/>)}
                 {settingsPage === 'payments' && <PaymentsPanel authHeaders={authHeaders} loading={loading} setLoading={setLoading} isOwner={rank === 'admin'}/>}
                 {settingsPage === 'files' && <ShopFilesPanel authHeaders={authHeaders} setLoading={setLoading} isOwner={rank === 'admin'}/>}
                 {settingsPage === 'general' && <GeneralPanel authHeaders={authHeaders} loading={loading} setLoading={setLoading} siteName={siteName}/>}
