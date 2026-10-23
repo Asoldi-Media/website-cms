@@ -100,7 +100,7 @@ Optional (first-run admin account):
 
 - **CMS_ADMIN_USERNAME** / **CMS_ADMIN_PASSWORD** – First admin login for this client’s CMS. Without a usable password the CMS writes a one-time login to `<dataPath>/cms/private/secrets/initial-admin.json`. The client admin set in the Asoldi hub replaces it. See [docs/security.md](docs/security.md).
 - **CMS_ADMIN_SECRET** – Optional. Signs admin sessions and the cart cookie. Without one (16+ characters) the CMS keeps its own secret in `<dataPath>/cms/private/secrets/secrets.json`.
-- **CMS_PUBLIC_URL** – Public site origin used in hub heartbeats (e.g. `https://mongsushi.no`). If unset, the CMS infers it from the incoming request host.
+- **CMS_PUBLIC_URL** – Public site origin used in hub heartbeats (e.g. `https://example-client.no`). If unset, the CMS infers it from the incoming request host.
 
 ---
 

@@ -33,5 +33,5 @@ test('Asoldi seed adds preset templates', () => {
 
 test('seed detector recognizes asoldi.com', () => {
   assert.equal(shouldSeedAsoldiPresets({ domain: 'asoldi.com', name: 'Asoldi' }), true);
-  assert.equal(shouldSeedAsoldiPresets({ domain: 'mongsushi.no', name: 'Mong Sushi' }), false);
+  assert.equal(shouldSeedAsoldiPresets({ domain: 'example-client.no', name: 'Example Client' }), false);
 });

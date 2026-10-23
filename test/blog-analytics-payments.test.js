@@ -35,7 +35,7 @@ test('draft posts stay private', () => {
 
 test('analytics DNS verify uses the injected lookup', async () => {
   const settings = {
-    domain: 'mongsushi.no',
+    domain: 'example-client.no',
     dnsTxtName: '_asoldi-analytics',
     dnsTxtValue: 'asoldi-site=abc',
     measurementId: 'G-TEST',

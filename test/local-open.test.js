@@ -21,7 +21,7 @@ test('loopback and private hosts are local; public domains are not', () => {
   assert.equal(isLoopbackOrPrivateHostname('192.168.68.92'), true);
   assert.equal(isLoopbackOrPrivateHostname('10.0.0.8'), true);
   assert.equal(isLoopbackOrPrivateHostname('172.28.7.10'), true);
-  assert.equal(isLoopbackOrPrivateHostname('byneset.no'), false);
+  assert.equal(isLoopbackOrPrivateHostname('example-cafe.no'), false);
   assert.equal(isLoopbackOrPrivateHostname('asoldi.com'), false);
   assert.equal(isLoopbackOrPrivateHostname('8.8.8.8'), false);
 });

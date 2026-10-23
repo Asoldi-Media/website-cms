@@ -5,7 +5,7 @@ Source is `server/` and `client/`. Hostinger and Website Creator run those files
 ## Architecture
 
 ```
-Client site (e.g. mongsushi.no)
+Client site (e.g. example-client.no)
 ├── Website (existing)
 ├── npm: @asoldi/client-cms
 ├── Mount: /api/cms → createCmsRoutes({ hubUrl, siteKey, dataPath })

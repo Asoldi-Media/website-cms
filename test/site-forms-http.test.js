@@ -11,7 +11,7 @@ import { applyFieldMap, formsRuntimeScript } from '../server/forms.js';
 // What Website Creator's Step 3 ships as cms.site.json.
 const SEED = {
   version: 1,
-  site: { name: 'Byneset Bydelskafé', language: 'nb', domain: 'byneset.no' },
+  site: { name: 'Example Kafé', language: 'nb', domain: 'example-cafe.no' },
   lists: [{ id: 'seed-list-1', name: 'Nyhetsbrev', slug: 'nyhetsbrev' }],
   forms: [
     {
