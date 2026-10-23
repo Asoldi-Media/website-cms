@@ -74,7 +74,8 @@ test('hub calls send x-site-key (query kept for older hubs); heartbeat reports p
     assert.equal(request.query.site_key, SITE_KEY);
     const beat = await waitFor(() => hub.state.heartbeats[0]);
     assert.equal(beat.site_key, SITE_KEY);
-    assert.equal(beat.packageBuild, 'dev', 'source tree without a vendor manifest reports dev');
+    assert.equal(beat.packageBuild, readPackageBuild(), 'dev in this repo; the manifest build in a shipped copy');
+    assert.match(beat.packageBuild, /^(dev|[a-f0-9]{12})$/);
     assert.equal(typeof beat.packageVersion, 'string');
     assert.equal(beat.passwordHash, undefined);
   } finally {
