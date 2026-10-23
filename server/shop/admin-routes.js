@@ -14,6 +14,7 @@ import { exportProducts, importProducts } from './csv.js';
 import { ordersCsv, parseRange, salesReport, vatReport } from './reports.js';
 import { toMinor } from './money.js';
 import { productVariants, variantStockQty } from './product.js';
+import { isSignInFileName } from '../secret.js';
 
 function clean(value, max = 200) {
   return String(value ?? '').trim().slice(0, max);
@@ -246,8 +247,8 @@ export function mountShopAdmin(router, shop, ops, { adminAuth, ownerAuth, privat
 
   router.get('/shop/admin/files', adminAuth, (_req, res) => {
     if (!existsSync(privateDir)) return res.json([]);
-    // Plain files only: the secrets/ folder next to them is not a shop file.
-    const files = readdirSync(privateDir, { withFileTypes: true }).filter((e) => e.isFile() && !e.name.startsWith('.'));
+    // Plain files only: the secrets/ folder next to them is not a shop file, and neither is a sign-in file name.
+    const files = readdirSync(privateDir, { withFileTypes: true }).filter((e) => e.isFile() && !e.name.startsWith('.') && !isSignInFileName(e.name));
     res.json(files.map((e) => ({ file: e.name, size: statSync(join(privateDir, e.name)).size })));
   });
   router.post('/shop/admin/files', ownerAuth, upload.single('file'), (req, res) => {

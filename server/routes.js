@@ -102,6 +102,8 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
     const secrets = resolveCmsSecrets({ dataPath: resolvedDataPath, env: process.env, explicit: adminSecretOption });
     if (secrets.warning)
         console.warn(`[cms] ${secrets.warning}`);
+    if (secrets.adopted?.length)
+        console.log(`[cms] Moved ${secrets.adopted.length} sign-in file(s) from an earlier CMS version into cms/private/secrets.`);
     const adminSecret = secrets.adminSecret;
     const tokens = createTokenSigner(adminSecret);
     const loginLimiter = createLoginLimiter();

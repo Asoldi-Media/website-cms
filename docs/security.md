@@ -13,6 +13,8 @@ Each site keeps its secrets in `<dataPath>/cms/private/secrets/`. On Hostinger t
 
 Treat the folder like a password file. It never goes into Git, support uploads, or backups that leave the server.
 
+**Sites upgraded from 1.7.x.** The 1.7 line kept `secrets.json` and `initial-admin.json` directly in `cms/private/`. At start this version moves them (and any set-aside copies such as `secrets.json.invalid-<time>`) into `cms/private/secrets/`, so admin sessions from before the upgrade stay valid and the first admin login is where this page says it is. If the secrets folder already holds its own `secrets.json`, that one wins and a different older copy is kept next to it as `secrets.json.legacy-<time>`. The log says `Moved N sign-in file(s) …` once. If a file cannot be moved, the log says so; the shop file routes never list or serve these names either way.
+
 ## Session secret
 
 1. `adminSecret` passed to `createCmsRoutes` (tests and dev tools).

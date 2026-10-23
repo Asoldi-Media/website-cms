@@ -4,7 +4,7 @@
  * under {dataPath}/cms/private/secrets (outside the deployed repo) and reused.
  */
 import { randomBytes } from 'crypto';
-import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'fs';
+import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 export const KNOWN_DEFAULT_SECRETS = Object.freeze(['change-me', 'changeme', 'change-me-in-production', 'secret', 'admin', 'password', 'test', 'dev']);
@@ -16,6 +16,9 @@ export const MIN_ENV_PASSWORD_LENGTH = 8;
 const DISK_SECRET_MIN_LENGTH = 32;
 const SECRETS_FILE = 'secrets.json';
 const INITIAL_ADMIN_FILE = 'initial-admin.json';
+/** A sign-in file name: the secret or the first admin login, or a set-aside or temp copy of one. */
+const SIGN_IN_FILE_NAME = /^(secrets|initial-admin)\.json(\..*)?$/;
+const NO_HARD_LINKS = Object.freeze(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EACCES', 'EMLINK']);
 
 /** {dataPath}/cms/private: never served by URL; the shop keeps its digital product files here. */
 export function cmsPrivateDir(dataPath) {
@@ -34,6 +37,99 @@ function ensurePrivateDir(dataPath) {
     const dir = cmsSecretsDir(dataPath);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     return dir;
+}
+/**
+ * True for a sign-in file name. Shop download files never match (uploads are named
+ * <time>-<hex>.<ext>), so the shop file routes skip these names.
+ */
+export function isSignInFileName(name) {
+    return SIGN_IN_FILE_NAME.test(String(name ?? ''));
+}
+function sameContent(a, b) {
+    try {
+        return readFileSync(a).equals(readFileSync(b));
+    }
+    catch {
+        return false;
+    }
+}
+function unlinkIfPresent(file) {
+    try {
+        unlinkSync(file);
+    }
+    catch (error) {
+        if (error?.code !== 'ENOENT')
+            throw error;
+    }
+}
+/** Move `source` to `target` only if `target` does not exist yet. Returns false when it does. */
+function moveOnce(source, target) {
+    try {
+        linkSync(source, target);
+    }
+    catch (error) {
+        if (error?.code === 'EEXIST')
+            return false;
+        if (!NO_HARD_LINKS.includes(error?.code))
+            throw error;
+        if (existsSync(target))
+            return false;
+        renameSync(source, target);
+        return true;
+    }
+    unlinkIfPresent(source);
+    return true;
+}
+/**
+ * CMS 1.7.x kept the session secret and the first admin login directly in cms/private.
+ * This version reads them from cms/private/secrets and keeps shop download files in
+ * cms/private, so move them: sessions signed before the upgrade stay valid, and the
+ * files leave the shop files folder. A file already in the secrets folder wins; a
+ * different older copy is kept next to it as <name>.legacy-<time>. Never throws.
+ * Returns { moved, failed } (file names).
+ */
+export function adoptLegacySignInFiles(dataPath) {
+    const moved = [];
+    const failed = [];
+    if (!dataPath)
+        return { moved, failed };
+    const from = cmsPrivateDir(dataPath);
+    let names;
+    try {
+        names = readdirSync(from, { withFileTypes: true }).filter((entry) => entry.isFile() && isSignInFileName(entry.name)).map((entry) => entry.name);
+    }
+    catch {
+        return { moved, failed };
+    }
+    if (!names.length)
+        return { moved, failed };
+    let dir;
+    try {
+        dir = ensurePrivateDir(dataPath);
+    }
+    catch {
+        return { moved, failed: names };
+    }
+    for (const name of names) {
+        const source = join(from, name);
+        const target = join(dir, name);
+        try {
+            if (!moveOnce(source, target)) {
+                // Another start moved the same file first, or this version already made its own.
+                if (sameContent(source, target))
+                    unlinkIfPresent(source);
+                else
+                    renameSync(source, join(dir, `${name}.legacy-${Date.now()}-${randomBytes(3).toString('hex')}`));
+            }
+            moved.push(name);
+        }
+        catch (error) {
+            if (error?.code === 'ENOENT')
+                continue;
+            failed.push(name);
+        }
+    }
+    return { moved, failed };
 }
 /** True for a value that is long enough and not a well-known placeholder. */
 export function isStrongSecret(value) {
@@ -97,6 +193,8 @@ function sleepSync(ms) {
 /** Read or create {dataPath}/cms/private/secrets/secrets.json. Concurrent first starts agree on one secret. */
 export function readOrCreateDiskSecrets(dataPath) {
     const dir = ensurePrivateDir(dataPath);
+    // A site upgraded from 1.7.x keeps its secret (and so its sessions).
+    adoptLegacySignInFiles(dataPath);
     const file = join(dir, SECRETS_FILE);
     for (let attempt = 0; attempt < 3; attempt += 1) {
         const existing = existsSync(file) ? readSecretsFile(file) : null;
@@ -129,23 +227,30 @@ export function readOrCreateDiskSecrets(dataPath) {
 /**
  * Admin token secret. Order: explicit option (when strong or not a placeholder),
  * env CMS_ADMIN_SECRET / ADMIN_SECRET (when strong), then the disk secret.
- * Returns { adminSecret, source, createdAt, warning }. Never logs the value.
+ * Sign-in files a 1.7.x site left in cms/private are moved into the secrets folder first,
+ * whichever source wins. Returns { adminSecret, source, createdAt, warning, adopted }.
+ * Never logs the value.
  */
 export function resolveCmsSecrets({ dataPath, env = process.env, explicit } = {}) {
+    const legacy = adoptLegacySignInFiles(dataPath);
+    const legacyWarning = legacy.failed.length
+        ? `Could not move ${legacy.failed.length} sign-in file(s) from cms/private into cms/private/secrets; the shop file routes skip them.`
+        : '';
+    const result = (fields) => ({ ...fields, warning: [fields.warning, legacyWarning].filter(Boolean).join(' '), adopted: legacy.moved });
     const explicitValue = explicit === undefined || explicit === null ? '' : String(explicit);
     if (explicitValue && !KNOWN_DEFAULT_SECRETS.includes(explicitValue.trim().toLowerCase())) {
-        return { adminSecret: explicitValue, source: 'explicit', createdAt: '', warning: '' };
+        return result({ adminSecret: explicitValue, source: 'explicit', createdAt: '', warning: '' });
     }
     let warning = explicitValue ? 'The adminSecret option is a placeholder; using the secret in the private data folder.' : '';
     const envName = String(env?.CMS_ADMIN_SECRET || '').trim() ? 'CMS_ADMIN_SECRET' : String(env?.ADMIN_SECRET || '').trim() ? 'ADMIN_SECRET' : '';
     if (envName) {
         const value = String(env[envName]).trim();
         if (isStrongSecret(value))
-            return { adminSecret: value, source: 'env', createdAt: '', warning };
+            return result({ adminSecret: value, source: 'env', createdAt: '', warning });
         warning = `${envName} is shorter than ${MIN_ENV_SECRET_LENGTH} characters or a placeholder; using the secret in the private data folder.`;
     }
     const disk = readOrCreateDiskSecrets(dataPath);
-    return { adminSecret: disk.adminSecret, source: 'disk', createdAt: disk.createdAt, warning };
+    return result({ adminSecret: disk.adminSecret, source: 'disk', createdAt: disk.createdAt, warning });
 }
 /** First admin login: env CMS_ADMIN_* when usable, else a generated password. */
 export function initialAdminCredentials(env = process.env) {
