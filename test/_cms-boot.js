@@ -1,5 +1,5 @@
 /** Boot helpers for the admin-access tests: a CMS on a random port and a fake hub that records calls. */
-import { createHmac } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import express from 'express';
 import createCmsRoutes from '../server/routes.js';
 
@@ -25,9 +25,10 @@ export async function bootCms({ dataPath, hubUrl = '', siteKey = 'access-site', 
   };
 }
 
-/** Hub stand-in for /api/hub/site-config and /api/hub/heartbeat. */
+/** Hub stand-in for /api/hub/site-config, /api/hub/heartbeat and /api/cms/sso/redeem. */
 export async function fakeHub({ siteKey = 'access-site', config = {} } = {}) {
-  const state = { configRequests: [], heartbeats: [], config };
+  const state = { configRequests: [], heartbeats: [], config, ssoChecks: [] };
+  const ssoTokens = new Map();
   const app = express();
   app.use(express.json());
   app.get('/api/hub/site-config', (req, res) => {
@@ -40,10 +41,23 @@ export async function fakeHub({ siteKey = 'access-site', config = {} } = {}) {
     state.heartbeats.push(req.body);
     res.json({ ok: true });
   });
+  app.post('/api/cms/sso/redeem', (req, res) => {
+    state.ssoChecks.push({ key: req.get('x-site-key') || '' });
+    const row = ssoTokens.get(req.body?.token);
+    if (!row || row.used || req.get('x-site-key') !== siteKey) return res.status(401).json({ ok: false, message: 'Unauthorized.' });
+    row.used = true;
+    return res.json({ ok: true, by: row.by });
+  });
   const server = await listen(app);
   return {
     state,
     url: `http://127.0.0.1:${server.address().port}`,
+    /** A one-time 'Open CMS as Asoldi' token, as the hub issues it. */
+    issueSso(by = 'support@example.com') {
+      const token = randomBytes(32).toString('base64url');
+      ssoTokens.set(token, { by, used: false });
+      return token;
+    },
     close: () => new Promise((r) => server.close(r)),
   };
 }

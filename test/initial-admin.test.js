@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHmac, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -167,11 +166,11 @@ test('recovery: the hub client admin replaces the generated login and clears the
 test('recovery: an Asoldi SSO session can create a new admin-rank login for the client', async () => {
   const siteKey = 'sso-recovery-site';
   const root = tempData();
-  const cms = await bootCms({ dataPath: root, siteKey });
+  const hub = await fakeHub({ siteKey });
+  const cms = await bootCms({ dataPath: root, siteKey, hubUrl: hub.url });
   try {
     await waitFor(() => readInitialAdminFile(root));
-    const data = JSON.stringify({ sid: '1', n: randomBytes(16).toString('hex'), exp: Date.now() + 60_000, by: 'support@asoldi.com' });
-    const link = Buffer.from(JSON.stringify({ data, sig: createHmac('sha256', siteKey).update(data).digest('hex') })).toString('base64url');
+    const link = hub.issueSso('support@example.com');
     const html = await fetch(`${cms.base}/admin/sso?token=${link}`).then((r) => r.text());
     const token = JSON.parse(html.match(/setItem\('adminToken',("[^"]+")\)/)[1]);
     const created = await postJson(`${cms.base}/admin/users`, { username: 'kunde', password: 'kunde-kode-55', rank: 'admin' }, bearer(token));
@@ -179,8 +178,10 @@ test('recovery: an Asoldi SSO session can create a new admin-rank login for the 
     const res = await login(cms.base, 'kunde', 'kunde-kode-55');
     assert.equal(res.status, 200);
     assert.equal(res.data.rank, 'admin');
+    assert.deepEqual(hub.state.ssoChecks, [{ key: siteKey }]);
   } finally {
     await cms.close();
+    await hub.close();
     rmSync(root, { recursive: true, force: true });
   }
 });

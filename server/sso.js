@@ -1,13 +1,22 @@
 /**
- * "Open CMS as Asoldi": verifies a one-time login token minted by the hub
- * (HMAC with this site's site_key, 60 s, nonce burned on first use).
+ * "Open CMS as Asoldi": the hub gives staff a one-time link with a random token. Before a session
+ * opens, the CMS asks the hub whether the token is good (POST {hubUrl}/api/cms/sso/redeem with this
+ * site's key), so only a link the hub issued for this site, unused and within its 60 s, signs in.
+ * The hub address comes from the server config only. Any doubt (no answer within 5 s, an error, a
+ * redirect, anything but { ok: true }) refuses the sign-in. Tokens are also burned here, and every
+ * sign-in is audited.
  */
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHash } from 'crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 export const SSO_SESSION_MS = 8 * 60 * 60 * 1000;
-const MAX_TTL_MS = 120_000;
+export const SSO_REDEEM_TIMEOUT_MS = 5000;
+/** A burned token is remembered this long (the hub's own token lives 60 s). */
+const BURN_KEEP_MS = 10 * 60 * 1000;
+const MAX_BURNED = 1000;
+/** 32 random bytes, base64url: the only shape the hub issues. */
+const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 
 function readJson(path, fallback) {
   try {
@@ -17,46 +26,77 @@ function readJson(path, fallback) {
   }
 }
 
-/** One-time 'Open CMS as Asoldi' tokens signed with the site key: verify, burn the nonce, keep an audit log. */
-export function createSsoVerifier({ dataPath, siteKey }) {
+/** The hub address from the server config, or '' when there is no usable hub. */
+export function hubBase(hubUrl) {
+  const raw = String(hubUrl || '').trim().replace(/\/+$/, '');
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return '';
+    if (url.username || url.password) return '';
+    return raw;
+  } catch {
+    return '';
+  }
+}
+
+/** One-time 'Open CMS as Asoldi' tokens, checked with the hub: verify, burn, keep an audit log. */
+export function createSsoVerifier({ dataPath, siteKey, hubUrl, fetchImpl = (...args) => fetch(...args), timeoutMs = SSO_REDEEM_TIMEOUT_MS, now = () => Date.now() }) {
   const dir = join(dataPath, 'cms');
-  const noncePath = join(dir, 'sso-nonces.json');
+  const burnPath = join(dir, 'sso-nonces.json');
   const auditPath = join(dir, 'audit.json');
+  const base = hubBase(hubUrl);
 
   function save(path, value) {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(path, JSON.stringify(value, null, 2), 'utf8');
   }
 
-  /** Returns { ok, by } or { ok:false, reason }. Burns the nonce on success. */
-  function verify(token, now = Date.now()) {
-    if (!siteKey) return { ok: false, reason: 'not-linked' };
-    let raw;
+  /** True when this token was not seen before; it is marked as seen in the same step (no await in between). */
+  function burn(id, t) {
+    const raw = readJson(burnPath, {});
+    const seen = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    for (const [key, until] of Object.entries(seen)) if (!(Number(until) > t)) delete seen[key];
+    if (seen[id]) return false;
+    seen[id] = t + BURN_KEEP_MS;
+    const keys = Object.keys(seen);
+    for (const key of keys.slice(0, Math.max(0, keys.length - MAX_BURNED))) delete seen[key];
+    save(burnPath, seen);
+    return true;
+  }
+
+  /** Resolves { ok: true, by } or { ok: false, reason }. Never throws. */
+  async function verify(token) {
+    if (!siteKey || !base) return { ok: false, reason: 'not-linked' };
+    const value = String(token || '').trim();
+    if (!TOKEN_RE.test(value)) return { ok: false, reason: 'malformed' };
+    const id = createHash('sha256').update(value).digest('hex');
     try {
-      raw = JSON.parse(Buffer.from(String(token || ''), 'base64url').toString('utf8'));
+      if (!burn(id, now())) return { ok: false, reason: 'used' };
     } catch {
-      return { ok: false, reason: 'malformed' };
+      return { ok: false, reason: 'storage' };
     }
-    if (typeof raw?.data !== 'string' || typeof raw?.sig !== 'string') return { ok: false, reason: 'malformed' };
-    const expect = Buffer.from(createHmac('sha256', siteKey).update(raw.data).digest('hex'));
-    const given = Buffer.from(raw.sig);
-    if (expect.length !== given.length || !timingSafeEqual(expect, given)) return { ok: false, reason: 'bad-signature' };
-    let data;
+    let response;
     try {
-      data = JSON.parse(raw.data);
+      response = await fetchImpl(`${base}/api/cms/sso/redeem`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-site-key': siteKey },
+        body: JSON.stringify({ token: value }),
+        redirect: 'error',
+        signal: AbortSignal.timeout(timeoutMs),
+      });
     } catch {
-      return { ok: false, reason: 'malformed' };
+      return { ok: false, reason: 'hub-unreachable' };
     }
-    const exp = Number(data.exp);
-    if (!Number.isFinite(exp) || exp < now || exp - now > MAX_TTL_MS) return { ok: false, reason: 'expired' };
-    const nonce = String(data.n || '');
-    if (!/^[a-f0-9]{16,64}$/.test(nonce)) return { ok: false, reason: 'malformed' };
-    const used = readJson(noncePath, {}) || {};
-    for (const [key, until] of Object.entries(used)) if (Number(until) < now) delete used[key];
-    if (used[nonce]) return { ok: false, reason: 'used' };
-    used[nonce] = exp + MAX_TTL_MS;
-    save(noncePath, used);
-    return { ok: true, by: String(data.by || 'asoldi').slice(0, 80) };
+    if (response.status !== 200) return { ok: false, reason: response.status === 429 ? 'hub-busy' : 'refused' };
+    let body;
+    try {
+      body = await response.json();
+    } catch {
+      return { ok: false, reason: 'hub-answer' };
+    }
+    if (!body || body.ok !== true) return { ok: false, reason: 'refused' };
+    return { ok: true, by: String(body.by || 'asoldi').slice(0, 80) };
   }
 
   function audit(entry) {

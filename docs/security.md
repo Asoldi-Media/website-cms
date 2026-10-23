@@ -33,6 +33,17 @@ Changing the secret signs everyone out and empties open carts.
 
 Signatures are checked in constant time. A token with no expiry field counts as issued at `at` plus 7 days.
 
+## Open CMS as Asoldi
+
+Asoldi staff open the CMS from the hub with a one-time link, `GET /api/cms/admin/sso?token=…` (`server/sso.js`).
+
+- The token is 32 random bytes from the hub. Before a session opens, the CMS asks the hub whether it is good: `POST {hubUrl}/api/cms/sso/redeem` with this site's key in `x-site-key` and `{ token }` in the body. The hub accepts a token once, only for the site it was issued to, and only within 60 seconds.
+- `hubUrl` comes from the server config (`cms.config.json` or `CMS_HUB_URL`), never from the request. Without a site key or hub the route answers `404`.
+- The sign-in is refused (`401`) unless the hub answers `200` with `{ ok: true }` within 5 seconds. An error, a redirect, a timeout or an unreachable hub all refuse it.
+- The CMS also remembers each token it has seen for 10 minutes, so a second use is refused before the hub is asked.
+- Failed links count per client address like sign-ins: after 10 in 15 minutes the answer is `429` with `Retry-After`, and the hub is not asked.
+- A successful sign-in is an 8-hour admin session as `asoldi-support`, recorded in `cms/audit.json` (who, when, address), which admins see under `GET /api/cms/admin/audit`.
+
 ## Sign-in limits
 
 `POST /api/cms/admin/login` and `POST /api/cms/auth/login` count failed attempts over 15 minutes:

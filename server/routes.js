@@ -120,6 +120,8 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
     const resolvedPublicPath = publicPath || join(process.cwd(), 'public');
     const router = express.Router();
     const store = createStore(resolvedDataPath);
+    /** Failed 'Open CMS as Asoldi' links per address, so the link check cannot be used to flood the hub. */
+    const ssoLimiter = createLoginLimiter({ maxPerIp: 10, maxInFlight: 2 });
     seedTestBlogPosts(store, resolvedDataPath);
     startLocalBlogScheduler({
         store,
@@ -131,7 +133,7 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
     const analyticsEvents = createAnalyticsEventStore(resolvedDataPath);
     const emailTemplates = createEmailTemplateStore(resolvedDataPath);
     const siteEdits = createSiteEditsStore(resolvedDataPath);
-    const sso = createSsoVerifier({ dataPath: resolvedDataPath, siteKey });
+    const sso = createSsoVerifier({ dataPath: resolvedDataPath, siteKey, hubUrl });
     /** Step 3 seed: lists are created once (ids kept); forms and pages stay read-only. */
     const siteSeed = loadSiteSeed({ siteSeed: siteSeedInput, siteSeedPath });
     const seedListIdMap = store.seedLists(siteSeed.lists);
@@ -459,16 +461,35 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
         res.json({ token, rank: 'admin', username, name: username, local: true });
         return;
     });
-    router.get('/admin/sso', (req, res) => {
+    router.get('/admin/sso', async (req, res) => {
         res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
-        const result = sso.verify(req.query.token);
-        if (!result.ok) {
-            res.status(result.reason === 'not-linked' ? 404 : 401).type('html').send('<!doctype html><meta charset="utf-8"><p>Innloggingslenken er brukt eller utløpt. Åpne CMS på nytt fra Asoldi.</p>');
+        const refused = (status) => res.status(status).type('html').send('<!doctype html><meta charset="utf-8"><p>Innloggingslenken er brukt eller utløpt. Åpne CMS på nytt fra Asoldi.</p>');
+        const ip = clientIp(req);
+        // Counted before the hub is asked, like a sign-in attempt; only a good link takes it back.
+        const attempt = ssoLimiter.begin('', ip);
+        if (!attempt.ok) {
+            res.set('Retry-After', String(attempt.retryAfterSec));
+            res.status(429).type('html').send('<!doctype html><meta charset="utf-8"><p>For mange forsøk. Prøv igjen om litt.</p>');
             return;
         }
+        let result;
+        try {
+            result = await sso.verify(req.query.token);
+        }
+        catch {
+            result = { ok: false, reason: 'error' };
+        }
+        if (!result.ok) {
+            attempt.ticket.fail();
+            if (result.reason === 'hub-unreachable' || result.reason === 'hub-answer')
+                console.warn(`[cms] Asoldi sign-in link could not be checked with the hub (${result.reason}).`);
+            refused(result.reason === 'not-linked' ? 404 : 401);
+            return;
+        }
+        attempt.ticket.succeed();
         const at = Date.now();
         const token = signToken({ role: 'admin', username: 'asoldi-support', rank: 'admin', at, exp: at + SSO_SESSION_MS, sso: true, by: result.by });
-        sso.audit({ action: 'sso-login', by: result.by, ip: clientIp(req) });
+        sso.audit({ action: 'sso-login', by: result.by, ip });
         res.type('html').send(ssoLandingHtml(token));
     });
     router.get('/admin/audit', allow(), (_req, res) => {
