@@ -97,6 +97,18 @@ export function trustedProxyHops(env = process.env) {
   return Number.isInteger(hops) && hops >= 0 && hops <= 5 ? hops : 1;
 }
 
+function readClientAddress(req, hops) {
+  const socket = req?.socket?.remoteAddress || '';
+  const forwarded = String(req?.headers?.['x-forwarded-for'] || '')
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const forwardedFor = forwarded.length > 0;
+  if (!isProxyAddress(socket)) return { address: normalizeAddress(socket), mode: 'direct', forwardedFor };
+  if (!hops || !forwardedFor) return { address: normalizeAddress(socket), mode: 'shared-proxy', forwardedFor };
+  return { address: normalizeAddress(forwarded[Math.max(0, forwarded.length - hops)]), mode: 'forwarded', forwardedFor };
+}
+
 /**
  * Client address for the sign-in limits (the same rule as CMS 2.2). A direct connection counts by its
  * socket address. A request from a local reverse proxy counts by the X-Forwarded-For hop that proxy
@@ -104,14 +116,25 @@ export function trustedProxyHops(env = process.env) {
  * proxy that sends no X-Forwarded-For (or `hops` 0) counts as its own address.
  */
 export function clientIpFromRequest(req, { hops = trustedProxyHops() } = {}) {
-  const socket = req?.socket?.remoteAddress || '';
-  if (!isProxyAddress(socket)) return normalizeAddress(socket);
-  const forwarded = String(req?.headers?.['x-forwarded-for'] || '')
-    .split(',')
-    .map((part) => part.trim())
-    .filter(Boolean);
-  if (!hops || !forwarded.length) return normalizeAddress(socket);
-  return normalizeAddress(forwarded[Math.max(0, forwarded.length - hops)]);
+  return readClientAddress(req, hops).address;
+}
+
+/**
+ * Where the sign-in limits take the client address from, without the address itself (for the hub
+ * heartbeat; the same values as CMS 2.2): `direct` (the connecting address is not local, so it counts
+ * as the client), `forwarded` (the hop a local proxy appended) or `shared-proxy` (a local proxy that
+ * sent no usable header, so every visitor counts as one address). `forwardedFor` says whether the
+ * request carried X-Forwarded-For; `direct` with the header usually means a proxy on a public
+ * address, and then every visitor shares that address too.
+ */
+export function clientAddressMode(req, { hops = trustedProxyHops() } = {}) {
+  const { mode, forwardedFor } = readClientAddress(req, hops);
+  return { mode, forwardedFor };
+}
+
+/** True when every visitor counts as one address, so the per-address limit applies to the whole site. */
+export function isSharedAddressMode({ mode, forwardedFor } = {}) {
+  return mode === 'shared-proxy' || (mode === 'direct' && forwardedFor === true);
 }
 
 /**

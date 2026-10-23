@@ -307,3 +307,64 @@ test('public config shows only allowlisted keys; the hub first-admin sync still 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('the heartbeat says where the sign-in limits take the client address from, never the address', async () => {
+  clearAuthEnv();
+  delete process.env.CMS_TRUSTED_PROXY_HOPS;
+  process.env.CMS_ADMIN_PASSWORD = 'heartbeat-test-password';
+  const root = tempRoot();
+  const heartbeats = [];
+  const hub = express();
+  hub.use(express.json());
+  hub.get('/api/hub/site-config', (_req, res) => res.json({ id: 'site-1', name: 'Test Shop', features: {} }));
+  hub.post('/api/hub/heartbeat', (req, res) => {
+    heartbeats.push(req.body);
+    res.json({ ok: true });
+  });
+  const hubServer = await listen(hub);
+  const warnings = [];
+  const consoleWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  const addressWarnings = () => warnings.filter((line) => line.includes('loginAddressMode='));
+  try {
+    await withCms({ dataPath: root, hubUrl: hubServer.base }, async (base) => {
+      /** Loads the public config (which sends a heartbeat) and returns that heartbeat's address fields. */
+      const heartbeatAfterConfig = async (headers = {}) => {
+        const before = heartbeats.length;
+        assert.equal((await fetch(`${base}/config`, { headers })).status, 200);
+        for (let i = 0; i < 100 && heartbeats.length === before; i += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+        const { loginAddressMode, loginForwardedFor, loginAddressFrom } = heartbeats.at(-1) || {};
+        return { loginAddressMode, loginForwardedFor, loginAddressFrom };
+      };
+      // Before any sign-in, the config request itself is the sample.
+      assert.deepEqual(await heartbeatAfterConfig(), { loginAddressMode: 'shared-proxy', loginForwardedFor: false, loginAddressFrom: 'request' });
+      assert.deepEqual(await heartbeatAfterConfig({ 'X-Forwarded-For': '198.51.100.9, 203.0.113.5' }), {
+        loginAddressMode: 'forwarded',
+        loginForwardedFor: true,
+        loginAddressFrom: 'request',
+      });
+      // After a sign-in, the heartbeat reports how that sign-in arrived.
+      assert.equal((await login(base, 'admin', 'heartbeat-test-password', { 'X-Forwarded-For': '203.0.113.5' })).status, 200);
+      assert.deepEqual(await heartbeatAfterConfig(), { loginAddressMode: 'forwarded', loginForwardedFor: true, loginAddressFrom: 'sign-in' });
+      assert.deepEqual(addressWarnings(), [], 'no warning while each visitor has its own address');
+      // A sign-in through a local proxy that sends no X-Forwarded-For: every visitor shares one address.
+      assert.equal((await login(base, 'admin', 'heartbeat-test-password')).status, 200);
+      assert.equal((await login(base, 'admin', 'heartbeat-test-password')).status, 200);
+      assert.deepEqual(await heartbeatAfterConfig({ 'X-Forwarded-For': '203.0.113.5' }), {
+        loginAddressMode: 'shared-proxy',
+        loginForwardedFor: false,
+        loginAddressFrom: 'sign-in',
+      });
+      assert.equal(addressWarnings().length, 1, 'the shared address is logged once');
+      assert.match(addressWarnings()[0], /loginAddressMode=shared-proxy/);
+      assert.match(addressWarnings()[0], /CMS_TRUSTED_PROXY_HOPS/);
+    });
+    const sent = JSON.stringify(heartbeats) + warnings.join('\n');
+    for (const address of ['198.51.100.9', '203.0.113.5']) assert.ok(!sent.includes(address), `the heartbeat or log names ${address}`);
+  } finally {
+    console.warn = consoleWarn;
+    clearAuthEnv();
+    await close(hubServer.server);
+    rmSync(root, { recursive: true, force: true });
+  }
+});

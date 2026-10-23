@@ -99,7 +99,7 @@ Optional (first-run admin account and token signing):
 - **CMS_ADMIN_USERNAME** / **CMS_ADMIN_PASSWORD** – First admin for this client’s CMS (username defaults to `admin`). The password must be 8+ characters and not a common placeholder. Without it, a random password is written to `<data>/cms/private/initial-admin.json` (mode 0600). The client admin password set in the hub replaces it on the first config load.
 - **CMS_ADMIN_SECRET** – Optional token-signing secret (16+ characters). Without it, a random secret is generated once in `<data>/cms/private/secrets.json` (mode 0600) and reused across deploys.
 - Admin tokens expire after 7 days, and failed sign-ins are rate limited as in CMS 2.2: 10 per username from one client address, 100 per username from all addresses and 50 per address, each per 15 minutes. A successful sign-in clears that username's count for that address. A sign-in needs a username of up to 200 characters and a password of up to 1024, both as text; anything else gets 400. A request that fails while it is handled answers 500 and the site keeps running.
-- **CMS_TRUSTED_PROXY_HOPS** – Optional (default `1`). The number of reverse proxies in front of the CMS that append to `X-Forwarded-For`. The sign-in limit takes the client address from that many hops from the right of the header. `0` ignores the header.
+- **CMS_TRUSTED_PROXY_HOPS** – Optional (default `1`). The number of reverse proxies in front of the CMS that append to `X-Forwarded-For`. The sign-in limit takes the client address from that many hops from the right of the header. `0` ignores the header. The hub heartbeat reports which case applies (see below); when every visitor counts as one address, the CMS also logs a warning once.
 - New passwords (change password, staff users) must be 8 to 1024 characters, not counting spaces at the ends, and not a common default such as `changeme` or `password`. At start, an admin still on a default password that an earlier release shipped (`changeme`, `change-me`) gets a random one in `initial-admin.json`.
 - **CMS_PUBLIC_URL** – Public site origin used in hub heartbeats (e.g. `https://mongsushi.no`). If unset, the CMS infers it from the incoming request host.
 
@@ -200,6 +200,14 @@ That endpoint returns **404** when ecommerce is off. Product data stays on the c
 ```
 
 On each config load the CMS POSTs `{CMS_HUB_URL}/api/hub/heartbeat` with `site_key`, `packageVersion`, and `adminUrl` so the hub can show last-seen version for fleet updates.
+
+The heartbeat also says where the sign-in limits take the client address from, with the same fields as CMS 2.2 and never the address itself:
+
+- `loginAddressMode`: `forwarded` (the hop a local proxy appended; expected behind a proxy), `direct` (the connecting address is public and counts as the client) or `shared-proxy` (a local proxy that sends no usable `X-Forwarded-For`).
+- `loginForwardedFor`: whether `X-Forwarded-For` was present.
+- `loginAddressFrom`: `sign-in` (the last sign-in) or `request` (the config request that sent the heartbeat, before any sign-in).
+
+`shared-proxy`, or `direct` with `loginForwardedFor: true`, means every visitor counts as one address, so the per-address limit applies to the whole site. Set `CMS_TRUSTED_PROXY_HOPS` to match the proxies in front of the CMS.
 
 ---
 

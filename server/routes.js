@@ -35,9 +35,11 @@ import { resolveCmsSecrets } from './secret.js';
 import {
   MAX_PASSWORD_LENGTH,
   SHIPPED_DEFAULT_PASSWORDS,
+  clientAddressMode,
   createLoginLimiter,
   createTokenSigner,
   guardLogin,
+  isSharedAddressMode,
   isUsableEnvPassword,
   newPasswordProblem,
   publicConfig,
@@ -136,6 +138,25 @@ export default function createCmsRoutes({
   const router = answerAsyncErrors(express.Router());
   const store = createStore(resolvedDataPath);
   const emailTemplates = createEmailTemplateStore(resolvedDataPath);
+
+  /** How the last sign-in reached the CMS (the mode only, never an address), for the hub heartbeat. */
+  let lastSignInAddress = null;
+  let warnedSharedAddress = false;
+  function noteSignInAddress(req) {
+    lastSignInAddress = clientAddressMode(req);
+    if (!warnedSharedAddress && isSharedAddressMode(lastSignInAddress)) {
+      warnedSharedAddress = true;
+      console.warn(
+        `[cms] Sign-ins reach the CMS as loginAddressMode=${lastSignInAddress.mode} (X-Forwarded-For ${lastSignInAddress.forwardedFor ? 'present' : 'absent'}), so the sign-in limits count every visitor as one address. Set CMS_TRUSTED_PROXY_HOPS to the number of proxies that append to X-Forwarded-For.`
+      );
+    }
+  }
+
+  /** Which address the sign-in limits use (`direct`, `forwarded`, `shared-proxy`), from the last sign-in or else this request. No address is sent. */
+  function loginAddressReport(req) {
+    const seen = lastSignInAddress || clientAddressMode(req);
+    return { loginAddressMode: seen.mode, loginForwardedFor: seen.forwardedFor, loginAddressFrom: lastSignInAddress ? 'sign-in' : 'request' };
+  }
 
   // Step 3 site seed (cms.site.json): lists are created once (ids preserved so
   // bindings resolve), forms + pages are read-only structure.
@@ -340,6 +361,7 @@ export default function createCmsRoutes({
         adminUrl,
         name: config?.name || '',
         adminApplied: config?.adminSynced === true,
+        ...loginAddressReport(req),
       }),
     }).catch(() => {});
   }
@@ -399,6 +421,7 @@ export default function createCmsRoutes({
   router.post('/admin/login', async (req, res) => {
     const { username, password, error } = readLoginBody(req.body);
     if (error) return res.status(400).json({ message: error });
+    noteSignInAddress(req);
     await adminReady;
     const attempt = guardLogin(loginLimiter, req, res, username, { knownAccount: await isKnownAccount(username) });
     if (!attempt) return;
@@ -502,6 +525,7 @@ export default function createCmsRoutes({
   router.post('/auth/login', async (req, res) => {
     const { username, password, error } = readLoginBody(req.body);
     if (error) return res.status(400).json({ message: error });
+    noteSignInAddress(req);
     await adminReady;
     const attempt = guardLogin(loginLimiter, req, res, username, { knownAccount: await isKnownAccount(username) });
     if (!attempt) return;

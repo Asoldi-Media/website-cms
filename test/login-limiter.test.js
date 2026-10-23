@@ -6,9 +6,11 @@ import vm from 'node:vm';
 import {
   MAX_PASSWORD_LENGTH,
   MAX_USERNAME_LENGTH,
+  clientAddressMode,
   clientIpFromRequest,
   createLoginLimiter,
   isProxyAddress,
+  isSharedAddressMode,
   readLoginBody,
   trustedProxyHops,
 } from '../server/auth-hardening.js';
@@ -46,6 +48,22 @@ test('the client IP behind a local proxy is the hop the proxy appended; a client
   for (let i = 0; i < 50; i += 1) keys.add(clientIpFromRequest(request('127.0.0.1', `198.51.100.${i}, 203.0.113.5`), hops1));
   assert.deepEqual([...keys], ['203.0.113.5']);
   assert.ok(clientIpFromRequest(request('127.0.0.1', `${'9'.repeat(500)}`), hops1).length <= 64, 'addresses are capped');
+});
+
+test('the address mode says where the client address comes from, without the address', () => {
+  const hops1 = { hops: 1 };
+  assert.deepEqual(clientAddressMode(request('127.0.0.1', '198.51.100.9, 203.0.113.5'), hops1), { mode: 'forwarded', forwardedFor: true });
+  assert.deepEqual(clientAddressMode(request('', '203.0.113.5'), hops1), { mode: 'forwarded', forwardedFor: true }, 'Unix socket');
+  assert.deepEqual(clientAddressMode(request('127.0.0.1'), hops1), { mode: 'shared-proxy', forwardedFor: false });
+  assert.deepEqual(clientAddressMode(request('127.0.0.1', '203.0.113.5'), { hops: 0 }), { mode: 'shared-proxy', forwardedFor: true });
+  assert.deepEqual(clientAddressMode(request('203.0.113.8'), hops1), { mode: 'direct', forwardedFor: false });
+  assert.deepEqual(clientAddressMode(request('203.0.113.8', '198.51.100.9'), hops1), { mode: 'direct', forwardedFor: true });
+  // Every visitor shares one address in two cases: a local proxy without the header, and a public proxy.
+  assert.equal(isSharedAddressMode({ mode: 'forwarded', forwardedFor: true }), false);
+  assert.equal(isSharedAddressMode({ mode: 'direct', forwardedFor: false }), false);
+  assert.equal(isSharedAddressMode({ mode: 'shared-proxy', forwardedFor: false }), true);
+  assert.equal(isSharedAddressMode({ mode: 'direct', forwardedFor: true }), true);
+  assert.equal(isSharedAddressMode(), false);
 });
 
 test('local, private and link-local addresses count as a proxy; public ones do not', () => {
