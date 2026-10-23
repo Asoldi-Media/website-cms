@@ -1,5 +1,4 @@
 import express from 'express';
-import { createHmac } from 'crypto';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
@@ -32,6 +31,18 @@ import {
   successMessageFor,
   wantsJson,
 } from './forms.js';
+import { resolveCmsSecrets } from './secret.js';
+import {
+  KNOWN_DEFAULT_PASSWORDS,
+  clientIpFromRequest,
+  createLoginLimiter,
+  createTokenSigner,
+  guardLogin,
+  isUsableEnvPassword,
+  publicConfig,
+  randomAdminPassword,
+  writeInitialAdmin,
+} from './auth-hardening.js';
 
 export { resolveCmsDataPath } from './data-path.js';
 export { loadSiteSeed, normalizeSiteSeed } from './site-seed.js';
@@ -87,9 +98,13 @@ export default function createCmsRoutes({
   dataPath,
   siteSeed: siteSeedInput,
   siteSeedPath,
-  adminSecret = process.env.CMS_ADMIN_SECRET || process.env.ADMIN_SECRET || 'change-me',
+  // Optional: an explicit secret wins (tests). Otherwise env (if strong) or the
+  // generated secret in <data>/cms/private/secrets.json.
+  adminSecret,
+  loginLimiter = createLoginLimiter(),
 } = {}) {
   const resolvedDataPath = resolveCmsDataPath({ dataPath, siteKey });
+  const tokens = createTokenSigner(adminSecret || resolveCmsSecrets({ dataPath: resolvedDataPath }).adminSecret);
   const router = express.Router();
   const store = createStore(resolvedDataPath);
   const emailTemplates = createEmailTemplateStore(resolvedDataPath);
@@ -183,28 +198,44 @@ export default function createCmsRoutes({
   }
 
   function signToken(payload) {
-    const data = JSON.stringify(payload);
-    const sig = createHmac('sha256', adminSecret).update(data).digest('hex');
-    return Buffer.from(JSON.stringify({ data, sig })).toString('base64url');
+    return tokens.sign(payload);
   }
 
   function verifyToken(token) {
-    try {
-      const raw = JSON.parse(Buffer.from(token, 'base64url').toString());
-      const expect = createHmac('sha256', adminSecret).update(raw.data).digest('hex');
-      if (expect !== raw.sig) return null;
-      return JSON.parse(raw.data);
-    } catch {
-      return null;
-    }
+    return tokens.verify(token);
   }
 
+  async function hasDefaultPassword(admin) {
+    for (const candidate of KNOWN_DEFAULT_PASSWORDS) {
+      if (await store.verifyPassword(candidate, admin.passwordHash)) return true;
+    }
+    return false;
+  }
+
+  // There is never a built-in admin password. The first admin gets the env
+  // password (if strong) or a random one in <data>/cms/private/initial-admin.json;
+  // the hub's pendingAdmin then sets the client's real password. An admin still
+  // on a known default password gets a random one the same way.
   async function ensureAdmin() {
     const admin = await store.getAdmin();
-    if (admin) return;
+    const envPassword = process.env.CMS_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || '';
+    const pickPassword = () => (isUsableEnvPassword(envPassword) ? { password: envPassword, fromEnv: true } : { password: randomAdminPassword(), fromEnv: false });
+    if (admin?.passwordHash) {
+      if (!(await hasDefaultPassword(admin))) return;
+      const { password, fromEnv } = pickPassword();
+      const hash = await store.hashPassword(password);
+      const current = await store.getAdmin();
+      if (current?.passwordHash !== admin.passwordHash) return; // changed meanwhile (e.g. another process)
+      const file = fromEnv ? null : writeInitialAdmin(resolvedDataPath, { username: current.username, password, reason: 'default-password-replaced' });
+      store.applyAdminHash(current.username, hash);
+      console.warn(`[cms] The admin password was a known default and has been replaced${file ? ` (new password in ${file})` : ' (CMS_ADMIN_PASSWORD)'}. Set the client admin password from the hub.`);
+      return;
+    }
     const username = process.env.CMS_ADMIN_USERNAME || process.env.ADMIN_USERNAME || 'admin';
-    const password = process.env.CMS_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || 'changeme';
+    const { password, fromEnv } = pickPassword();
+    const file = fromEnv ? null : writeInitialAdmin(resolvedDataPath, { username, password, reason: 'first-boot' });
     await store.setAdminCredentials(username, password);
+    if (file) console.log(`[cms] Created the first CMS admin. Its password is in ${file} until the hub sets the client admin password.`);
   }
 
   function allow(...ranks) {
@@ -252,6 +283,7 @@ export default function createCmsRoutes({
       const data = await r.json();
       const config = withPackageVersion(data);
       if (data?.pendingAdmin?.passwordHash) {
+        await adminReady; // the hub's password must land after first-admin setup, never before it
         store.applyAdminHash(data.pendingAdmin.username, data.pendingAdmin.passwordHash);
         config.adminSynced = true;
       }
@@ -284,12 +316,14 @@ export default function createCmsRoutes({
     }).catch(() => {});
   }
 
-  ensureAdmin();
+  const adminReady = ensureAdmin().catch((error) => {
+    console.error('[cms] Admin setup failed:', error?.message || error);
+  });
 
   router.get('/config', async (req, res) => {
     const config = await fetchHubConfig();
     sendHeartbeat(req, config);
-    res.json(config);
+    res.json(publicConfig(config));
   });
 
   router.get('/catalog', async (req, res) => {
@@ -311,15 +345,20 @@ export default function createCmsRoutes({
     if (!username || !password) {
       return res.status(400).json({ message: 'Username and password required' });
     }
+    if (!guardLogin(loginLimiter, req, res, username)) return;
+    await adminReady;
     const valid = await store.verifyAdmin(username, password);
     if (valid) {
+      loginLimiter.succeed(username);
       const token = signToken({ role: 'admin', username, rank: 'admin', at: Date.now() });
       return res.json({ token, rank: 'admin', username, name: username });
     }
     const staff = await store.verifyEmployee(username, password);
     if (!staff.ok) {
+      loginLimiter.fail(username, clientIpFromRequest(req));
       return res.status(401).json({ message: 'Invalid credentials' });
     }
+    loginLimiter.succeed(username);
     const rank = normalizeRank(staff.user.rank);
     const token = signToken({ role: 'staff', userId: staff.user.id, username: staff.user.username, rank, at: Date.now() });
     return res.json({ token, rank, username: staff.user.username, name: staff.user.name || staff.user.username });
@@ -370,9 +409,14 @@ export default function createCmsRoutes({
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ message: 'Current and new password required' });
     }
+    if (!guardLogin(loginLimiter, req, res, req.actor.username)) return;
+    const wrongCurrent = () => {
+      loginLimiter.fail(req.actor.username, clientIpFromRequest(req));
+      return res.status(401).json({ message: 'Current password is wrong' });
+    };
     if (req.actor.rank === 'admin') {
       const valid = await store.verifyAdmin(req.actor.username, currentPassword);
-      if (!valid) return res.status(401).json({ message: 'Current password is wrong' });
+      if (!valid) return wrongCurrent();
       const admin = await store.getAdmin();
       if (!admin) return res.status(500).json({ message: 'Admin not found' });
       await store.setAdminCredentials(admin.username, newPassword);
@@ -381,7 +425,7 @@ export default function createCmsRoutes({
     const user = store.getUserById(req.actor.userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
     const valid = await store.verifyPassword(currentPassword, user.passwordHash);
-    if (!valid) return res.status(401).json({ message: 'Current password is wrong' });
+    if (!valid) return wrongCurrent();
     await store.updateUserPassword(user.id, newPassword);
     res.json({ ok: true });
   });
@@ -391,10 +435,13 @@ export default function createCmsRoutes({
     if (!username || !password) {
       return res.status(400).json({ message: 'Username and password required' });
     }
+    if (!guardLogin(loginLimiter, req, res, username)) return;
     const result = await store.verifyEmployee(username, password);
     if (!result.ok) {
+      loginLimiter.fail(username, clientIpFromRequest(req));
       return res.status(401).json({ message: 'Invalid username or password' });
     }
+    loginLimiter.succeed(username);
     const token = signToken({ role: 'employee', userId: result.user.id, at: Date.now() });
     res.json({ token, user: result.user });
   });

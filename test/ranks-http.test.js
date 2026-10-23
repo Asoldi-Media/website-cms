@@ -6,6 +6,10 @@ import path from 'node:path';
 import express from 'express';
 import createCmsRoutes from '../server/routes.js';
 
+// There is no built-in admin password; tests set the first admin's password explicitly.
+const ADMIN_PASSWORD = 'test-admin-password';
+process.env.CMS_ADMIN_PASSWORD = ADMIN_PASSWORD;
+
 async function withServer(fn) {
   const root = mkdtempSync(path.join(tmpdir(), 'asoldi-ranks-http-'));
   const app = express();
@@ -32,7 +36,7 @@ async function withServer(fn) {
   }
 }
 
-async function login(base, username = 'admin', password = 'changeme') {
+async function login(base, username = 'admin', password = ADMIN_PASSWORD) {
   for (let i = 0; i < 10; i += 1) {
     const res = await fetch(`${base}/admin/login`, {
       method: 'POST',

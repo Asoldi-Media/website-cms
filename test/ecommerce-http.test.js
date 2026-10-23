@@ -6,6 +6,10 @@ import path from 'node:path';
 import express from 'express';
 import createCmsRoutes from '../server/routes.js';
 
+// There is no built-in admin password; tests set the first admin's password explicitly.
+const ADMIN_PASSWORD = 'test-admin-password';
+process.env.CMS_ADMIN_PASSWORD = ADMIN_PASSWORD;
+
 async function withServer(fn) {
   const root = mkdtempSync(path.join(tmpdir(), 'asoldi-cms-http-'));
   const app = express();
@@ -38,7 +42,7 @@ async function login(base) {
     const res = await fetch(`${base}/admin/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'admin', password: 'changeme' }),
+      body: JSON.stringify({ username: 'admin', password: ADMIN_PASSWORD }),
     });
     if (res.ok) {
       const data = await res.json();
