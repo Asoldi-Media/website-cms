@@ -128,6 +128,16 @@ export function createStore(dataPath) {
         async getAdmin() {
             return readAdmin();
         },
+        /** True when the name is the site admin's or a staff login's (case-insensitive), read now. */
+        isKnownUsername(username) {
+            const name = String(username || '').trim().toLowerCase();
+            if (!name)
+                return false;
+            const admin = readAdmin();
+            if (admin && String(admin.username || '').trim().toLowerCase() === name)
+                return true;
+            return readUsers().some((u) => String(u.username || '').toLowerCase() === name);
+        },
         async setAdminCredentials(username, password) {
             const hash = await this.hashPassword(password);
             writeAdmin({ username, passwordHash: hash });

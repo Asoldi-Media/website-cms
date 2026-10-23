@@ -4,7 +4,10 @@
  * the password check, and only a correct password takes it back, so parallel requests cannot pass the
  * limits together. At most `maxInFlight` password checks run at once per username and per address.
  * Memory stays bounded: usernames are kept as short hashes, addresses are capped, every key keeps at
- * most its limit of timestamps, and the table holds at most `maxKeys` keys (the oldest go first).
+ * most its limit of timestamps, and the table holds at most `maxKeys` keys. When it is full, counts for
+ * usernames that do not exist go first, then addresses (oldest first). Counts for real usernames
+ * (`isKnownAccount`) are never dropped while they are inside the window, so a flood of made-up names
+ * cannot reset a locked account.
  */
 import { createHash } from 'node:crypto';
 
@@ -104,9 +107,26 @@ export function createLoginLimiter({
     maxInFlight = 2,
     sweepEveryMs = 60 * 1000,
     now = () => Date.now(),
+    isKnownAccount = () => false,
 } = {}) {
     /** key → ascending attempt times (failed, or still being checked), at most the limit for that kind of key. */
     const failures = new Map();
+    /** Pair and username keys of real usernames: never dropped for room while inside the window. */
+    const kept = new Set();
+    function forget(key) {
+        failures.delete(key);
+        kept.delete(key);
+    }
+    function knownAccount(account) {
+        if (!account)
+            return false;
+        try {
+            return Boolean(isKnownAccount(account));
+        }
+        catch {
+            return false;
+        }
+    }
     /** username or address key → password checks running now; a key leaves when its last check settles. */
     const running = new Map();
     let lastSweep = now();
@@ -122,7 +142,7 @@ export function createLoginLimiter({
         while (list.length && t - list[0] >= windowMs)
             list.shift();
         if (!list.length)
-            failures.delete(key);
+            forget(key);
         return list;
     }
     /** Drops expired keys, at most once per `sweepEveryMs`, so an attempt never scans the table. */
@@ -133,10 +153,10 @@ export function createLoginLimiter({
         lastSweep = t;
         for (const [key, list] of failures) {
             if (!list.length || t - list[list.length - 1] >= windowMs)
-                failures.delete(key);
+                forget(key);
         }
     }
-    function record(key, t) {
+    function record(key, t, keep = false) {
         const list = recent(key);
         list.push(t);
         const limit = limitOf(key);
@@ -144,6 +164,8 @@ export function createLoginLimiter({
             list.splice(0, list.length - limit);
         failures.delete(key);
         failures.set(key, list);
+        if (keep && key[0] !== 'i')
+            kept.add(key);
     }
     /** Takes back one attempt counted at `t` (it may already have left the window or the table). */
     function unrecord(key, t) {
@@ -154,13 +176,25 @@ export function createLoginLimiter({
         if (at >= 0)
             list.splice(at, 1);
         if (!list.length)
-            failures.delete(key);
+            forget(key);
     }
+    /** Makes room: unknown usernames first, then addresses, then real usernames whose window has passed. */
     function capKeys() {
-        for (const key of failures.keys()) {
+        if (failures.size <= maxKeys)
+            return;
+        const passes = [(key) => key[0] !== 'i' && !kept.has(key), (key) => key[0] === 'i'];
+        for (const evictable of passes) {
+            for (const key of failures.keys()) {
+                if (failures.size <= maxKeys)
+                    return;
+                if (evictable(key))
+                    forget(key);
+            }
+        }
+        for (const key of [...failures.keys()]) {
             if (failures.size <= maxKeys)
-                break;
-            failures.delete(key);
+                return;
+            recent(key);
         }
     }
     function blocked(key) {
@@ -210,8 +244,9 @@ export function createLoginLimiter({
             if (runKeys.some((key) => (running.get(key) || 0) >= maxInFlight))
                 return { ok: false, retryAfterSec: 1, busy: true };
             const t = now();
+            const keep = knownAccount(account);
             for (const key of keys)
-                record(key, t);
+                record(key, t, keep);
             capKeys();
             for (const key of runKeys)
                 running.set(key, (running.get(key) || 0) + 1);
@@ -237,7 +272,7 @@ export function createLoginLimiter({
                         for (const key of keys)
                             unrecord(key, t);
                         if (account)
-                            failures.delete(pairKey(account, ip));
+                            forget(pairKey(account, ip));
                     },
                 },
             };
@@ -248,14 +283,15 @@ export function createLoginLimiter({
         fail(account, ip) {
             sweep();
             const t = now();
+            const keep = knownAccount(account);
             for (const key of keysFor(account, ip))
-                record(key, t);
+                record(key, t, keep);
             capKeys();
         },
         /** Clears the username's count for this address; the per-username and per-address counts keep running. */
         succeed(account, ip) {
             if (account)
-                failures.delete(pairKey(account, ip));
+                forget(pairKey(account, ip));
         },
         /** Keys now held (tests and diagnostics). */
         keys() {

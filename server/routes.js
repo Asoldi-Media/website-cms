@@ -106,7 +106,6 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
         console.log(`[cms] Moved ${secrets.adopted.length} sign-in file(s) from an earlier CMS version into cms/private/secrets.`);
     const adminSecret = secrets.adminSecret;
     const tokens = createTokenSigner(adminSecret);
-    const loginLimiter = createLoginLimiter();
     /** How the last sign-in reached the CMS (the mode only, never an address), for the heartbeat. */
     let lastSignInAddress = null;
     let warnedPublicProxy = false;
@@ -120,6 +119,8 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
     const resolvedPublicPath = publicPath || join(process.cwd(), 'public');
     const router = express.Router();
     const store = createStore(resolvedDataPath);
+    // Counts for real usernames are never dropped to make room while they are inside the window.
+    const loginLimiter = createLoginLimiter({ isKnownAccount: (username) => store.isKnownUsername(username) });
     /** Failed 'Open CMS as Asoldi' links per address, so the link check cannot be used to flood the hub. */
     const ssoLimiter = createLoginLimiter({ maxPerIp: 10, maxInFlight: 2 });
     seedTestBlogPosts(store, resolvedDataPath);

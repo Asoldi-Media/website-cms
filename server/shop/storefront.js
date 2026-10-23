@@ -9,6 +9,7 @@ import { normalizeGiftcardCode } from './giftcards.js';
 import { productJsonLd } from './product.js';
 import { sellerBlock } from './documents.js';
 import { cartPage, productPage, resultPage } from './pages.js';
+import { clientIp as requestAddress } from '../login-limiter.js';
 
 const RECOVER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -33,9 +34,9 @@ export function createRateLimiter({ max, windowMs }) {
   };
 }
 
-/** Caller IP from x-forwarded-for or the socket. */
+/** Caller address for shop limits: the socket, or the hop a local proxy appended (never the client-written first hop). */
 export function clientIp(req) {
-  return clean(String(req.get('x-forwarded-for') || req.ip || '').split(',')[0], 60);
+  return clean(requestAddress(req), 60);
 }
 
 /** Cart summary JSON for the storefront. */
