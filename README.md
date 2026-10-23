@@ -2,7 +2,7 @@
 
 Client CMS for Asoldi client sites: **users**, **typed ecommerce** (menu / tiers / normal), and hub-driven feature flags (users, ecommerce, blog, social sync, analytics). Install in any client project; mount at `/api/cms`, show UI at `/admin`.
 
-Package version: **1.7.1** (1.7.1 is a maintenance release on the 1.7 line: admin sign-in hardening).
+Package version: **1.7.2** (1.7.2 is a maintenance release on the 1.7 line: admin sign-in hardening and the hub site credential).
 
 ---
 
@@ -208,6 +208,15 @@ The heartbeat also says where the sign-in limits take the client address from, w
 - `loginAddressFrom`: `sign-in` (the last sign-in) or `request` (the config request that sent the heartbeat, before any sign-in).
 
 `shared-proxy`, or `direct` with `loginForwardedFor: true`, means every visitor counts as one address, so the per-address limit applies to the whole site. Set `CMS_TRUSTED_PROXY_HOPS` to match the proxies in front of the CMS.
+
+### Site credential (1.7.2)
+
+The site key is a public identifier (it is in the site's form HTML). Hub calls also carry a site credential in the `x-site-credential` header (`server/hub-credential.js`), the same as CMS 2.2.2:
+
+- 32 random bytes, made once in `<data>/cms/private/secrets/hub-credential.json` (mode 0600). CMS 2.2.2 and later read the same file, so an upgrade keeps it.
+- Sent only to `CMS_HUB_URL` (never an address from a request), over https or to a hub on this machine or the local network; never in `GET /api/cms/config`, logs or the heartbeat body. A hub answer that redirects gets the call again without it.
+- **Enrollment:** a few seconds after start, and with each heartbeat until the hub has accepted it (with growing pauses after a failure), the CMS posts `{ siteKey, credential, nonce }` to `{CMS_HUB_URL}/api/hub/site-credential/enroll`. The hub asks `https://<the site's domain in the hub>/api/cms/hub-enroll-proof?nonce=<nonce>`, and the CMS answers `HMAC-SHA256(credential, nonce)` only for a nonce it sent in the last two minutes. After the hub revokes the credential, the CMS makes a new one and enrolls it.
+- The hub sends the client admin password set in Manage clients (`pendingAdmin`) only with the credential, and acts on heartbeat fields only with it.
 
 ---
 
