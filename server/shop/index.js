@@ -23,12 +23,12 @@ export function hashToken(token) {
 }
 
 /** Shop engine shared by the storefront, account and admin routes. */
-export function createShop({ store, dataPath, hubUrl, siteKey, adminSecret, getSiteName = async () => '', notifyOwner = async () => {} }) {
+export function createShop({ store, dataPath, hubUrl, siteKey, hubCredential = null, adminSecret, getSiteName = async () => '', notifyOwner = async () => {} }) {
   const db = createShopDb(dataPath);
   const stock = createStock({ db, store });
   const bookings = createBookings({ db, getSettings: () => db.getSettings(), heldSlots: (exceptRef) => stock.heldSlots(exceptRef) });
   const giftcards = createGiftcards({ db });
-  const hub = createHubClient({ hubUrl, siteKey });
+  const hub = createHubClient({ hubUrl, siteKey, credential: hubCredential });
   const checkoutsPath = join(dataPath, 'cms', 'checkouts.json');
   const finalizing = new Map();
 

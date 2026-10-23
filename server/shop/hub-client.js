@@ -1,9 +1,12 @@
-/** Server-to-server calls to asoldi.com, authenticated by this site's site_key. */
+/**
+ * Server-to-server calls to asoldi.com: the site key names the site, and the site credential
+ * (server/hub-credential.js) shows the call comes from its own server. Payments need the credential.
+ */
 
 const STATUS_TTL_MS = 30_000;
 
 /** Hub API client for shop calls (checkout, verify, refunds, documents). */
-export function createHubClient({ hubUrl, siteKey }) {
+export function createHubClient({ hubUrl, siteKey, credential = null }) {
   const base = String(hubUrl || '').trim().replace(/\/+$/, '');
   const linked = Boolean(base && siteKey);
   let statusCache = { at: 0, value: null };
@@ -14,7 +17,8 @@ export function createHubClient({ hubUrl, siteKey }) {
       err.status = 503;
       throw err;
     }
-    const res = await fetch(`${base}${path}`, {
+    const send = credential ? credential.hubFetch : fetch;
+    const res = await send(`${base}${path}`, {
       method,
       headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-site-key': siteKey },
       body: body === undefined ? undefined : JSON.stringify(body),

@@ -26,6 +26,7 @@ import { mountAccount } from './shop/account.js';
 import { mountShopAdmin, mountPayments } from './shop/admin-routes.js';
 import { formatMoney } from './shop/money.js';
 import { createSsoVerifier, ssoLandingHtml, SSO_SESSION_MS } from './sso.js';
+import { createHubCredential } from './hub-credential.js';
 import { createEmailTemplateStore, mergeFieldsMeta, shouldSeedAsoldiPresets } from './email-templates.js';
 import { loadSiteSeed } from './site-seed.js';
 import { hostnameFromHostHeader, isLocalCmsOpenRequest, isLoopbackOrPrivateHostname, localDevInboxForm, LOCAL_DEV_INBOX_FORM_ID } from './local-open.js';
@@ -101,8 +102,11 @@ function withPackageVersion(data) {
         packageVersion: PACKAGE_VERSION,
     };
 }
-/** CMS router. Pass hubUrl, siteKey, and optional dataPath, siteSeed, siteSeedPath, publicPath, adminSecret (else env or the private data folder). */
-export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: siteSeedInput, siteSeedPath, publicPath, adminSecret: adminSecretOption, } = {}) {
+/**
+ * CMS router. Pass hubUrl, siteKey, and optional dataPath, siteSeed, siteSeedPath, publicPath, adminSecret (else env or the private
+ * data folder) and hubEnroll (false: do not enroll the site credential on its own; the proof route still answers).
+ */
+export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: siteSeedInput, siteSeedPath, publicPath, adminSecret: adminSecretOption, hubEnroll = true, } = {}) {
     const resolvedDataPath = resolveCmsDataPath({ dataPath, siteKey });
     const secrets = resolveCmsSecrets({ dataPath: resolvedDataPath, env: process.env, explicit: adminSecretOption });
     if (secrets.warning)
@@ -139,7 +143,11 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
     const analyticsEvents = createAnalyticsEventStore(resolvedDataPath);
     const emailTemplates = createEmailTemplateStore(resolvedDataPath);
     const siteEdits = createSiteEditsStore(resolvedDataPath);
-    const sso = createSsoVerifier({ dataPath: resolvedDataPath, siteKey, hubUrl });
+    /** Site credential for calls to the hub (server/hub-credential.js): made once, enrolled a few seconds after start. */
+    const hubCredential = createHubCredential({ dataPath: resolvedDataPath, hubUrl, siteKey, autoEnroll: hubEnroll !== false });
+    hubCredential.start();
+    const hubFetch = (url, init) => hubCredential.hubFetch(url, init);
+    const sso = createSsoVerifier({ dataPath: resolvedDataPath, siteKey, hubUrl, fetchImpl: hubFetch });
     /** Step 3 seed: lists are created once (ids kept); forms and pages stay read-only. */
     const siteSeed = loadSiteSeed({ siteSeed: siteSeedInput, siteSeedPath });
     const seedListIdMap = store.seedLists(siteSeed.lists);
@@ -193,7 +201,7 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
             ...extra,
         };
         try {
-            const r = await fetch(`${base}/api/client-forms/${encodeURIComponent(siteKey)}`, {
+            const r = await hubFetch(`${base}/api/client-forms/${encodeURIComponent(siteKey)}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
                 body: JSON.stringify(payload),
@@ -312,6 +320,7 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
         dataPath: resolvedDataPath,
         hubUrl,
         siteKey,
+        hubCredential,
         adminSecret,
         getSiteName: async () => (await fetchHubConfig()).name || siteSeed.name || '',
         notifyOwner: (order, { lowStock = [], message = '' } = {}) => {
@@ -343,7 +352,8 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
         try {
             const base = hubUrl.replace(/\/$/, '');
             // x-site-key is the preferred channel; ?site_key= stays for hubs that only read the query.
-            const r = await fetch(`${base}/api/hub/site-config?site_key=${encodeURIComponent(siteKey)}`, {
+            // The client admin fields (pendingAdmin) come only with this site's credential.
+            const r = await hubFetch(`${base}/api/hub/site-config?site_key=${encodeURIComponent(siteKey)}`, {
                 headers: { Accept: 'application/json', 'x-site-key': siteKey },
             });
             if (!r.ok)
@@ -369,7 +379,7 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
             return null;
         try {
             const params = new URLSearchParams({ site_key: siteKey, ...query });
-            const r = await fetch(`${hubUrl.replace(/\/$/, '')}/api/hub/analytics?${params}`, {
+            const r = await hubFetch(`${hubUrl.replace(/\/$/, '')}/api/hub/analytics?${params}`, {
                 headers: { Accept: 'application/json', 'x-site-key': siteKey },
             });
             if (!r.ok)
@@ -383,7 +393,7 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
     function forwardCommerceToHub(payload) {
         if (!siteKey || !hubUrl || !payload)
             return;
-        fetch(`${hubUrl.replace(/\/$/, '')}/api/hub/analytics/commerce`, {
+        hubFetch(`${hubUrl.replace(/\/$/, '')}/api/hub/analytics/commerce`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ site_key: siteKey, ...payload }),
@@ -392,7 +402,7 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
     function forwardTrafficToHub(events) {
         if (!siteKey || !hubUrl || !events?.length)
             return;
-        fetch(`${hubUrl.replace(/\/$/, '')}/api/hub/analytics/collect`, {
+        hubFetch(`${hubUrl.replace(/\/$/, '')}/api/hub/analytics/collect`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ site_key: siteKey, events }),
@@ -415,7 +425,9 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
             : host
                 ? `${proto}://${host}/admin`
                 : '';
-        fetch(`${base}/api/hub/heartbeat`, {
+        // Enroll first when needed (paused after a failure), so the hub can act on this heartbeat.
+        void hubCredential.ensureEnrolled();
+        hubFetch(`${base}/api/hub/heartbeat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -452,6 +464,17 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
             categories: store.getAllCategories().map(publicCategory),
             products: products.map((product) => ({ ...publicProduct(product), buyable: checkout && isBuyable(product) })),
         });
+    });
+    // The hub confirms an enrollment by asking this site's own domain for the proof of a nonce the
+    // CMS sent it in the last two minutes (server/hub-credential.js). Anything else is 404.
+    router.get('/hub-enroll-proof', (req, res) => {
+        res.set('Cache-Control', 'no-store');
+        const proof = hubCredential.proofFor(req.query.nonce);
+        if (!proof) {
+            res.status(404).json({ message: 'Not found' });
+            return;
+        }
+        res.json({ proof });
     });
     router.get('/admin/local-open', (req, res) => {
         res.json({ open: isLocalCmsOpenRequest(req) });
