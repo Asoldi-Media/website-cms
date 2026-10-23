@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.2.2 (2026-10-23)
+
+- Hub calls carry a site credential next to the site key: 32 random bytes made once in `cms/private/secrets`, sent only to the configured hub. The site enrolls it on its own (the hub checks it by asking the site's domain for `/api/cms/hub-enroll-proof`), and makes a new one after the hub revokes it. Payments, the client admin password from the hub and heartbeat details need an Asoldi hub that accepts the credential. See [docs/security.md](docs/security.md#hub-calls).
+- Shop calls to the hub, the hub analytics calls and the Asoldi sign-in check send the credential too.
+
 ## 2.2.1 (2026-10-23)
 
 - Asoldi sign-in links are checked with Asoldi before use (needs an Asoldi hub that offers the check). See [docs/security.md](docs/security.md).

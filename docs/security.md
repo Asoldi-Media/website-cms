@@ -10,6 +10,8 @@ Each site keeps its secrets in `<dataPath>/cms/private/secrets/`. On Hostinger t
 |---|---|
 | `secrets.json` | `{ version, adminSecret, createdAt }`. Signs admin sessions and the cart cookie. Created once on first start (two processes starting together agree on one value). |
 | `initial-admin.json` | One-time admin login when no usable password was given. Removed when the admin changes the password or the Asoldi hub sets the client admin. |
+| `hub-credential.json` | `{ version, credential, createdAt, hubOrigin, enrolledAt?, enrolledHub? }`. The site credential for hub calls (see Hub calls). Created once; replaced only after the hub revokes it or when the hub address changes. |
+| `hub-enroll-pending.json` | Hashes of enrollment nonces this site sent in the last two minutes, so every process of the site can answer the hub's proof request. |
 
 Treat the folder like a password file. It never goes into Git, support uploads, or backups that leave the server.
 
@@ -89,3 +91,17 @@ The package build id (`packageBuild`, from `cms.vendor.manifest.json` in shipped
 ## Hub calls
 
 Server-to-server calls send the site key in the `x-site-key` header. `GET /api/hub/site-config` also still carries `?site_key=` for hubs that read only the query; that copy will be dropped once every hub reads the header.
+
+The site key is a public identifier: it is written into the site's form HTML. Calls that need more than that carry the **site credential** in the `x-site-credential` header (`server/hub-credential.js`):
+
+- 32 random bytes, made once in `cms/private/secrets/hub-credential.json` (mode 0600).
+- Sent only to the configured hub (`hubUrl` / `CMS_HUB_URL`, never an address taken from a request), over https or to a hub on this machine or the local network. A hub answer that redirects gets the call again without the credential, and the log asks for the hub's final address. A credential made for one hub address is never sent to another; the CMS makes a new one.
+- Never part of `GET /api/cms/config`, page HTML, logs or heartbeat bodies.
+
+**Enrollment.** A few seconds after start, and with each heartbeat until the hub has accepted it (with growing pauses after a failure, at least 30 minutes while the hub has enrollment switched off), the CMS posts `{ siteKey, credential, nonce }` to `<hub>/api/hub/site-credential/enroll`. The hub then asks `https://<the site's domain in the hub>/api/cms/hub-enroll-proof?nonce=<nonce>`. The CMS answers `HMAC-SHA256(credential, nonce)` only for a nonce it sent itself in the last two minutes, for its current credential; any other request gets 404. The hub keeps only `sha256(credential)`. So the site needs its domain set in the hub, and `/api/cms` must be reachable on that domain.
+
+**What needs it.** The hub sends the pending client admin password (`pendingAdmin`) only with the credential, acts on heartbeat fields (version, admin address, name, `adminApplied`) only with it, and requires it for payment, payee and payment-detail calls. Once a site has enrolled, shop status, shop documents and the analytics dashboard need it too.
+
+**Status answers.** Hub answers carry `x-site-credential-status` (`valid`, `missing`, `invalid`, `not-enrolled`). `not-enrolled` after this site had enrolled means the hub revoked the credential: the CMS makes a new one and enrolls it. `invalid` enrolls the current one again.
+
+**Turning it off.** `createCmsRoutes({ hubEnroll: false })` stops the automatic enrollment (tests and local tools); the proof route still answers for nonces the site sent.
