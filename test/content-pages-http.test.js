@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import express from 'express';
+import { TEST_ADMIN_PASSWORD } from './_admin.js';
 import createCmsRoutes from '../server/routes.js';
 import { mountPublicHtmlTracker } from '../server/html-tracker.js';
 import { normalizePost, publicPost } from '../server/blog.js';
@@ -38,7 +39,7 @@ async function withApp(seed, publicDir, fn) {
 }
 
 async function login(origin) {
-    const password = process.env.CMS_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || 'changeme';
+    const password = TEST_ADMIN_PASSWORD;
     const username = process.env.CMS_ADMIN_USERNAME || process.env.ADMIN_USERNAME || 'admin';
     for (let i = 0; i < 10; i += 1) {
         const res = await fetch(`${origin}/api/cms/admin/login`, {

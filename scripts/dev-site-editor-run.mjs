@@ -127,6 +127,8 @@ writeFileSync(seedPath, JSON.stringify(seed, null, 2));
 process.env.CMS_DEV_ECOMMERCE = process.env.CMS_DEV_ECOMMERCE || '1';
 process.env.CMS_DEV_GENERAL = process.env.CMS_DEV_GENERAL || '1';
 process.env.CMS_DEV_BLOG = process.env.CMS_DEV_BLOG || '1';
+// Admin opens without a password on this machine (127.0.0.1 only).
+process.env.CMS_LOCAL_OPEN = process.env.CMS_LOCAL_OPEN || '1';
 const dataPath = join(tmpdir(), `asoldi-real-editor-data-${runId.slice(0, 8)}`);
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -157,7 +159,7 @@ mountCmsAdmin(app, { publicPath: publicDir, siteSeedPath: seedPath });
 
 app.listen(port, '127.0.0.1', () => {
   const marked = pages.filter((p) => p.slots?.hasMarkers).length;
-  console.log(`Real-template editor http://127.0.0.1:${port}/admin  (admin / changeme)`);
+  console.log(`Real-template editor http://127.0.0.1:${port}/admin  (opens without a password on this machine)`);
   console.log(`Run ${runId} step-${step}  pages=${pages.length} marked=${marked}`);
   console.log(pages.map((p) => `${p.route} [${p.kind}] text=${p.slots.text?.length || 0}`).join('\n'));
 });

@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import express from 'express';
+import { TEST_ADMIN_PASSWORD } from './_admin.js';
 import createCmsRoutes from '../server/routes.js';
 
 export const SITE_KEY = 'site-key-1';
@@ -130,7 +131,7 @@ export async function withShop(fn, { seed } = {}) {
   }
 }
 
-export async function login(base, username = 'admin', password = 'changeme') {
+export async function login(base, username = 'admin', password = TEST_ADMIN_PASSWORD) {
   for (let i = 0; i < 10; i += 1) {
     const res = await fetch(`${base}/admin/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
     if (res.ok) return { Authorization: `Bearer ${(await res.json()).token}` };

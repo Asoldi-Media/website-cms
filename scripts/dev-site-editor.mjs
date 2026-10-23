@@ -16,6 +16,8 @@ cpSync(join(fixtureDir, 'product.html'), join(publicDir, 'product.html'));
 process.env.CMS_DEV_ECOMMERCE = process.env.CMS_DEV_ECOMMERCE || '1';
 process.env.CMS_DEV_GENERAL = process.env.CMS_DEV_GENERAL || '1';
 process.env.CMS_DEV_BLOG = process.env.CMS_DEV_BLOG || '1';
+// Admin opens without a password on this machine (127.0.0.1 only).
+process.env.CMS_LOCAL_OPEN = process.env.CMS_LOCAL_OPEN || '1';
 const dataPath = join(tmpdir(), 'asoldi-site-editor-data');
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -33,6 +35,6 @@ mountCmsAdmin(app, { publicPath: publicDir });
 
 const port = Number(process.env.PORT || 4177);
 app.listen(port, '127.0.0.1', () => {
-  console.log(`Site editor preview http://127.0.0.1:${port}/admin  (admin / changeme)`);
+  console.log(`Site editor preview http://127.0.0.1:${port}/admin  (opens without a password on this machine)`);
   console.log(`Pages: http://127.0.0.1:${port}/  and  /about  and  /product`);
 });

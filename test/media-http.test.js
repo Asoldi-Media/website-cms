@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import express from 'express';
+import { TEST_ADMIN_PASSWORD } from './_admin.js';
 import createCmsRoutes from '../server/routes.js';
 import { fixLatin1Name, listPublicSiteMedia, readUploadMaxBytes, sanitizeUploadName } from '../server/media.js';
 
@@ -29,7 +30,7 @@ async function login(base) {
     const res = await fetch(`${base}/admin/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'admin', password: 'changeme' }),
+      body: JSON.stringify({ username: 'admin', password: TEST_ADMIN_PASSWORD }),
     });
     if (res.ok) return { Authorization: `Bearer ${(await res.json()).token}` };
     await new Promise((r) => setTimeout(r, 50));

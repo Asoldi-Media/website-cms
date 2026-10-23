@@ -1,6 +1,5 @@
 /** CMS HTTP API. Client sites mount the default export at /api/cms. */
 import express from 'express';
-import { createHmac } from 'crypto';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
@@ -38,6 +37,10 @@ import { contentRuntimeScript } from './content-runtime.js';
 import { extractSlotMapFromHtml } from './slot-map.js';
 import { contentCoverage, resolvePublicHtml } from './html-tracker.js';
 import { cmsCapabilities } from './capabilities.js';
+import { clearInitialAdminFile, initialAdminCredentials, readInitialAdminFile, resolveCmsSecrets, writeInitialAdminFile, DEFAULT_ADMIN_PASSWORDS } from './secret.js';
+import { createTokenSigner, LOCAL_TOKEN_MS, LOGIN_TOKEN_MS } from './admin-token.js';
+import { createLoginLimiter, clientIp, guardLogin } from './login-limiter.js';
+import { publicConfig, readPackageBuild } from './public-config.js';
 import { applyFieldMap, errorMessageFor, formsRuntimeScript, looksLikeBot, publicSubmission, safeReturnPath, successMessageFor, wantsJson, } from './forms.js';
 export { resolveCmsDataPath } from './data-path.js';
 export { loadSiteSeed, normalizeSiteSeed } from './site-seed.js';
@@ -51,6 +54,7 @@ const PACKAGE_VERSION = (() => {
         return '0.0.0';
     }
 })();
+const PACKAGE_BUILD = readPackageBuild();
 function fallbackConfig() {
     const devEcommerce = process.env.CMS_DEV_ECOMMERCE === '1';
     const publicUrl = String(process.env.CMS_PUBLIC_URL || '').trim();
@@ -92,9 +96,15 @@ function withPackageVersion(data) {
         packageVersion: PACKAGE_VERSION,
     };
 }
-/** CMS router. Pass hubUrl, siteKey, and optional dataPath, siteSeed, siteSeedPath, publicPath, adminSecret. */
-export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: siteSeedInput, siteSeedPath, publicPath, adminSecret = process.env.CMS_ADMIN_SECRET || process.env.ADMIN_SECRET || 'change-me', } = {}) {
+/** CMS router. Pass hubUrl, siteKey, and optional dataPath, siteSeed, siteSeedPath, publicPath, adminSecret (else env or the private data folder). */
+export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: siteSeedInput, siteSeedPath, publicPath, adminSecret: adminSecretOption, } = {}) {
     const resolvedDataPath = resolveCmsDataPath({ dataPath, siteKey });
+    const secrets = resolveCmsSecrets({ dataPath: resolvedDataPath, env: process.env, explicit: adminSecretOption });
+    if (secrets.warning)
+        console.warn(`[cms] ${secrets.warning}`);
+    const adminSecret = secrets.adminSecret;
+    const tokens = createTokenSigner(adminSecret);
+    const loginLimiter = createLoginLimiter();
     const resolvedPublicPath = publicPath || join(process.cwd(), 'public');
     const router = express.Router();
     const store = createStore(resolvedDataPath);
@@ -199,37 +209,55 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
         res.status(400).json({ message: error?.message || 'Upload failed' });
         return;
     }
-    function signToken(payload) {
-        const data = JSON.stringify(payload);
-        const sig = createHmac('sha256', adminSecret).update(data).digest('hex');
-        return Buffer.from(JSON.stringify({ data, sig })).toString('base64url');
+    const signToken = (payload, ttlMs = LOGIN_TOKEN_MS) => tokens.sign(payload, ttlMs);
+    const verifyToken = (token) => tokens.verify(token);
+    /** Generated admin login: the file and the stored hash land together; only the path is logged. */
+    async function setGeneratedAdmin(username, reason) {
+        const { password } = initialAdminCredentials({});
+        const passwordHash = await store.hashPassword(password);
+        const file = writeInitialAdminFile(resolvedDataPath, { username, password, reason });
+        store.applyAdminHash(username, passwordHash);
+        console.warn(`[cms] Admin login for this site was generated. One-time login: ${file}`);
     }
-    function verifyToken(token) {
-        try {
-            const raw = JSON.parse(Buffer.from(token, 'base64url').toString());
-            const expect = createHmac('sha256', adminSecret).update(raw.data).digest('hex');
-            if (expect !== raw.sig)
-                return null;
-            return JSON.parse(raw.data);
+    async function adminUsesDefaultPassword(admin) {
+        if (!admin?.passwordHash)
+            return false;
+        for (const weak of DEFAULT_ADMIN_PASSWORDS) {
+            if (await store.verifyPassword(weak, admin.passwordHash))
+                return true;
         }
-        catch {
-            return null;
-        }
+        return false;
     }
-    async function ensureAdmin() {
+    async function ensureAdminOnce() {
         const admin = await store.getAdmin();
-        if (admin)
+        if (admin) {
+            // A well-known password is replaced; the hub's client admin or a password change takes over from there.
+            if (await adminUsesDefaultPassword(admin))
+                await setGeneratedAdmin(admin.username || 'admin', 'replaced-default-password');
             return;
-        const username = process.env.CMS_ADMIN_USERNAME || process.env.ADMIN_USERNAME || 'admin';
-        const password = process.env.CMS_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || 'changeme';
-        await store.setAdminCredentials(username, password);
+        }
+        const initial = initialAdminCredentials(process.env);
+        if (initial.generated)
+            await setGeneratedAdmin(initial.username, 'first-start');
+        else
+            await store.setAdminCredentials(initial.username, initial.password);
+    }
+    let ensureAdminPromise = null;
+    function ensureAdmin() {
+        if (!ensureAdminPromise) {
+            ensureAdminPromise = ensureAdminOnce().catch((error) => {
+                ensureAdminPromise = null;
+                console.error('[cms] Admin setup failed:', error?.message || error);
+            });
+        }
+        return ensureAdminPromise;
     }
     function allow(...ranks) {
         return (req, res, next) => {
             const auth = req.headers.authorization;
             const token = auth && auth.startsWith('Bearer ') ? auth.slice(7) : null;
             const payload = token ? verifyToken(token) : null;
-            if (!payload || (payload.exp && Date.now() > Number(payload.exp))) {
+            if (!payload) {
                 res.status(401).json({ message: 'Unauthorized' });
                 return;
             }
@@ -294,13 +322,20 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
             return fallbackConfig();
         try {
             const base = hubUrl.replace(/\/$/, '');
-            const r = await fetch(`${base}/api/hub/site-config?site_key=${encodeURIComponent(siteKey)}`);
+            // x-site-key is the preferred channel; ?site_key= stays for hubs that only read the query.
+            const r = await fetch(`${base}/api/hub/site-config?site_key=${encodeURIComponent(siteKey)}`, {
+                headers: { Accept: 'application/json', 'x-site-key': siteKey },
+            });
             if (!r.ok)
                 return fallbackConfig();
             const data = await r.json();
             const config = withPackageVersion(data);
             if (data?.pendingAdmin?.passwordHash) {
-                store.applyAdminHash(data.pendingAdmin.username, data.pendingAdmin.passwordHash);
+                // First-start setup must finish first, or it could overwrite the hub's login.
+                await ensureAdmin();
+                const applied = store.applyAdminHash(data.pendingAdmin.username, data.pendingAdmin.passwordHash);
+                if (applied?.ok !== false)
+                    clearInitialAdminFile(resolvedDataPath);
                 config.adminSynced = true;
             }
             return config;
@@ -314,7 +349,9 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
             return null;
         try {
             const params = new URLSearchParams({ site_key: siteKey, ...query });
-            const r = await fetch(`${hubUrl.replace(/\/$/, '')}/api/hub/analytics?${params}`);
+            const r = await fetch(`${hubUrl.replace(/\/$/, '')}/api/hub/analytics?${params}`, {
+                headers: { Accept: 'application/json', 'x-site-key': siteKey },
+            });
             if (!r.ok)
                 return null;
             return await r.json();
@@ -358,9 +395,11 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
             body: JSON.stringify({
                 site_key: siteKey,
                 packageVersion: PACKAGE_VERSION,
+                packageBuild: PACKAGE_BUILD,
                 adminUrl,
                 name: config?.name || '',
                 adminApplied: config?.adminSynced === true,
+                initialAdminPending: Boolean(readInitialAdminFile(resolvedDataPath)),
             }),
         }).catch(() => { });
     }
@@ -368,7 +407,7 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
     router.get('/config', async (req, res) => {
         const config = await fetchHubConfig();
         sendHeartbeat(req, config);
-        res.json(config);
+        res.json(publicConfig(config));
     });
     router.get('/catalog', async (req, res) => {
         const config = await fetchHubConfig();
@@ -398,7 +437,7 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
         await ensureAdmin();
         const admin = await store.getAdmin();
         const username = admin?.username || 'admin';
-        const token = signToken({ role: 'admin', username, rank: 'admin', at: Date.now(), local: true });
+        const token = signToken({ role: 'admin', username, rank: 'admin', at: Date.now(), local: true }, LOCAL_TOKEN_MS);
         res.json({ token, rank: 'admin', username, name: username, local: true });
         return;
     });
@@ -423,17 +462,24 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
             res.status(400).json({ message: 'Username and password required' });
             return;
         }
+        if (!guardLogin(loginLimiter, req, res, username))
+            return;
+        // A sign-in right after start waits for first-start admin setup instead of failing.
+        await ensureAdmin();
         const valid = await store.verifyAdmin(username, password);
         if (valid) {
+            loginLimiter.succeed(username);
             const token = signToken({ role: 'admin', username, rank: 'admin', at: Date.now() });
             res.json({ token, rank: 'admin', username, name: username });
             return;
         }
         const staff = await store.verifyEmployee(username, password);
         if (!staff.ok || !staff.user) {
+            loginLimiter.fail(username, clientIp(req));
             res.status(401).json({ message: 'Invalid credentials' });
             return;
         }
+        loginLimiter.succeed(username);
         const rank = normalizeRank(staff.user.rank);
         const token = signToken({ role: 'staff', userId: staff.user.id, username: staff.user.username, rank, at: Date.now() });
         res.json({ token, rank, username: staff.user.username, name: staff.user.name || staff.user.username });
@@ -501,6 +547,7 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
                 return;
             }
             await store.setAdminCredentials(admin.username, newPassword);
+            clearInitialAdminFile(resolvedDataPath);
             res.json({ ok: true });
             return;
         }
@@ -523,11 +570,15 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
             res.status(400).json({ message: 'Username and password required' });
             return;
         }
+        if (!guardLogin(loginLimiter, req, res, username))
+            return;
         const result = await store.verifyEmployee(username, password);
         if (!result.ok || !result.user) {
+            loginLimiter.fail(username, clientIp(req));
             res.status(401).json({ message: 'Invalid username or password' });
             return;
         }
+        loginLimiter.succeed(username);
         const token = signToken({ role: 'employee', userId: result.user.id, at: Date.now() });
         res.json({ token, user: result.user });
     });

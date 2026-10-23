@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import express from 'express';
+import { TEST_ADMIN_PASSWORD } from './_admin.js';
 import createCmsRoutes, { mountCmsAdmin } from '../server/routes.js';
 import { applyPatchesToHtml } from '../server/site-hydrator.js';
 
@@ -100,7 +101,7 @@ async function withServer(fn) {
   }
 }
 
-async function login(base, username = 'admin', password = 'changeme') {
+async function login(base, username = 'admin', password = TEST_ADMIN_PASSWORD) {
   for (let i = 0; i < 10; i += 1) {
     const res = await fetch(`${base}/api/cms/admin/login`, {
       method: 'POST',

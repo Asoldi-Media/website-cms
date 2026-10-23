@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import express from 'express';
+import { TEST_ADMIN_PASSWORD } from './_admin.js';
 import createCmsRoutes from '../server/routes.js';
 import { applyFieldMap, formsRuntimeScript } from '../server/forms.js';
 
@@ -72,7 +73,7 @@ async function login(base) {
     const res = await fetch(`${base}/admin/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'admin', password: 'changeme' }),
+      body: JSON.stringify({ username: 'admin', password: TEST_ADMIN_PASSWORD }),
     });
     if (res.ok) {
       const data = await res.json();
