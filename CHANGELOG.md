@@ -6,6 +6,7 @@
 - Sites upgraded from 1.7.x keep their admin sessions; the secret and first admin login move into `cms/private/secrets`.
 - New admin and staff passwords need at least 8 characters and may not be a common default.
 - Sign-in limits keep their counts for real usernames when the table is full, and the shop's own limits use the same client address as sign-ins.
+- An Asoldi sign-in completes even when its audit entry cannot be written, and the heartbeat reports an https admin address for public hosts.
 
 ## 2.2.0 (2026-10-23)
 

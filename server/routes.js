@@ -28,7 +28,7 @@ import { formatMoney } from './shop/money.js';
 import { createSsoVerifier, ssoLandingHtml, SSO_SESSION_MS } from './sso.js';
 import { createEmailTemplateStore, mergeFieldsMeta, shouldSeedAsoldiPresets } from './email-templates.js';
 import { loadSiteSeed } from './site-seed.js';
-import { isLocalCmsOpenRequest, localDevInboxForm, LOCAL_DEV_INBOX_FORM_ID } from './local-open.js';
+import { hostnameFromHostHeader, isLocalCmsOpenRequest, isLoopbackOrPrivateHostname, localDevInboxForm, LOCAL_DEV_INBOX_FORM_ID } from './local-open.js';
 import { createMediaLibrary, isAllowedMediaName, listPublicSiteMedia } from './media.js';
 import { createSiteEditsStore } from './site-edits.js';
 import { siteHydratorScript } from './site-hydrator.js';
@@ -408,7 +408,8 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
             return;
         const base = hubUrl.replace(/\/$/, '');
         const host = req.get('host') || '';
-        const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0].trim() || 'https';
+        // A visitor can write X-Forwarded-Proto; public hosts are always https behind the proxy.
+        const proto = isLoopbackOrPrivateHostname(hostnameFromHostHeader(host)) ? (req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim() || 'http' : 'https';
         const adminUrl = process.env.CMS_PUBLIC_URL
             ? `${process.env.CMS_PUBLIC_URL.replace(/\/$/, '')}/admin`
             : host
@@ -467,7 +468,18 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
         res.json({ token, rank: 'admin', username, name: username, local: true });
         return;
     });
+    // Async on Express 4: every error is caught here, so a failing step can never stop the process.
     router.get('/admin/sso', async (req, res) => {
+        try {
+            await ssoSignIn(req, res);
+        }
+        catch (error) {
+            console.error(`[cms] Asoldi sign-in failed (${error?.code || error?.name || 'error'}).`);
+            if (!res.headersSent)
+                res.status(500).type('html').send('<!doctype html><meta charset="utf-8"><p>Innloggingen feilet. Åpne CMS på nytt fra Asoldi.</p>');
+        }
+    });
+    async function ssoSignIn(req, res) {
         res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
         const refused = (status) => res.status(status).type('html').send('<!doctype html><meta charset="utf-8"><p>Innloggingslenken er brukt eller utløpt. Åpne CMS på nytt fra Asoldi.</p>');
         const ip = clientIp(req);
@@ -495,9 +507,15 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
         attempt.ticket.succeed();
         const at = Date.now();
         const token = signToken({ role: 'admin', username: 'asoldi-support', rank: 'admin', at, exp: at + SSO_SESSION_MS, sso: true, by: result.by });
-        sso.audit({ action: 'sso-login', by: result.by, ip });
+        try {
+            sso.audit({ action: 'sso-login', by: result.by, ip });
+        }
+        catch (error) {
+            // The hub has already burned the link and keeps its own record; a full or read-only disk must not block the sign-in.
+            console.warn(`[cms] Asoldi sign-in could not be written to the audit log (${error?.code || 'error'}).`);
+        }
         res.type('html').send(ssoLandingHtml(token));
-    });
+    }
     router.get('/admin/audit', allow(), (_req, res) => {
         res.json(sso.auditLog().slice(-100).reverse());
     });

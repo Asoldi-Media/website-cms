@@ -42,7 +42,8 @@ Asoldi staff open the CMS from the hub with a one-time link, `GET /api/cms/admin
 - The sign-in is refused (`401`) unless the hub answers `200` with `{ ok: true }` within 5 seconds. An error, a redirect, a timeout or an unreachable hub all refuse it.
 - The CMS also remembers each token it has seen for 10 minutes, so a second use is refused before the hub is asked.
 - Failed links count per client address like sign-ins: after 10 in 15 minutes the answer is `429` with `Retry-After`, and the hub is not asked.
-- A successful sign-in is an 8-hour admin session as `asoldi-support`, recorded in `cms/audit.json` (who, when, address), which admins see under `GET /api/cms/admin/audit`.
+- A successful sign-in is an 8-hour admin session as `asoldi-support`, recorded in `cms/audit.json` (who, when, address), which admins see under `GET /api/cms/admin/audit`. If that file cannot be written, the sign-in still completes and the server logs a warning.
+- The heartbeat reports the admin address as https for any public host; only a loopback or private host keeps the request's scheme. The hub sends sign-in links to the site's stored domain in any case.
 
 ## Passwords
 

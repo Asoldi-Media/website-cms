@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac, randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import express from 'express';
@@ -239,4 +240,72 @@ test('HS-3: a site without a site key or hub has no SSO, and sessions expire', a
     const stale = Buffer.from(JSON.stringify({ data, sig })).toString('base64url');
     assert.equal((await fetch(`${base}/admin/me`, { headers: { Authorization: `Bearer ${stale}` } })).status, 401);
   }, { hubUrl: '' });
+});
+
+test('HS-2: an audit log that cannot be written does not stop the sign-in or the server', async () => {
+  const hub = await fakeHub();
+  const root = mkdtempSync(path.join(tmpdir(), 'asoldi-sso-audit-'));
+  mkdirSync(path.join(root, 'cms', 'audit.json'), { recursive: true });
+  const app = express();
+  app.use(express.json());
+  app.use('/api/cms', createCmsRoutes({ dataPath: root, siteKey: SITE_KEY, hubUrl: hub.url, adminSecret: 'test-secret' }));
+  const server = await listen(app);
+  const base = `http://127.0.0.1:${server.address().port}/api/cms`;
+  const rejections = [];
+  const onRejection = (error) => rejections.push(error);
+  process.on('unhandledRejection', onRejection);
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const res = await fetch(`${base}/admin/sso?token=${hub.issue()}`, { signal: AbortSignal.timeout(5000) });
+    assert.equal(res.status, 200, 'the sign-in completes');
+    const token = tokenFromHtml(await res.text());
+    const me = await fetch(`${base}/admin/me`, { headers: { Authorization: `Bearer ${token}` } });
+    assert.equal(me.status, 200);
+    assert.equal((await fetch(`${base}/config`, { signal: AbortSignal.timeout(5000) })).status, 200, 'the server still answers');
+    await sleep(50);
+    assert.deepEqual(rejections, [], 'no unhandled rejection');
+  } finally {
+    console.warn = warn;
+    process.off('unhandledRejection', onRejection);
+    await new Promise((r) => server.close(r));
+    await hub.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/** GET with a chosen Host header (fetch does not allow one). */
+function getWithHost(url, host, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.get(url, { headers: { host, ...headers } }, (res) => {
+      res.resume();
+      res.on('end', () => resolve(res.statusCode));
+    });
+    req.on('error', reject);
+  });
+}
+
+test('HS-2: the heartbeat reports an https admin address for a public host, whatever X-Forwarded-Proto says', async () => {
+  const beats = [];
+  const hubApp = express();
+  hubApp.use(express.json());
+  hubApp.post('/api/hub/heartbeat', (req, res) => { beats.push(req.body); res.json({ ok: true }); });
+  hubApp.get('/api/hub/site-config', (_req, res) => res.json({}));
+  const hubServer = await listen(hubApp);
+  const saved = process.env.CMS_PUBLIC_URL;
+  delete process.env.CMS_PUBLIC_URL;
+  try {
+    await withCms(async (base) => {
+      assert.equal(await getWithHost(`${base}/config`, 'shop.example', { 'x-forwarded-proto': 'http' }), 200);
+      for (let i = 0; i < 100 && beats.length < 1; i += 1) await sleep(20);
+      assert.equal(beats[0]?.adminUrl, 'https://shop.example/admin');
+      const port = new URL(base).port;
+      assert.equal(await getWithHost(`${base}/config`, `127.0.0.1:${port}`), 200);
+      for (let i = 0; i < 100 && beats.length < 2; i += 1) await sleep(20);
+      assert.equal(beats[1]?.adminUrl, `http://127.0.0.1:${port}/admin`, 'a local host keeps http');
+    }, { hubUrl: `http://127.0.0.1:${hubServer.address().port}` });
+  } finally {
+    if (saved !== undefined) process.env.CMS_PUBLIC_URL = saved;
+    await new Promise((r) => hubServer.close(r));
+  }
 });
