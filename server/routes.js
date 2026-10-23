@@ -34,6 +34,7 @@ import {
 import { resolveCmsSecrets } from './secret.js';
 import {
   MAX_PASSWORD_LENGTH,
+  MAX_USERNAME_LENGTH,
   SHIPPED_DEFAULT_PASSWORDS,
   clientAddressMode,
   createLoginLimiter,
@@ -386,6 +387,13 @@ export default function createCmsRoutes({
     return true;
   }
 
+  /** Sign-in takes usernames of at most MAX_USERNAME_LENGTH characters, so a longer one could never sign in. */
+  function refuseLongUsername(res, username) {
+    if (String(username ?? '').trim().length <= MAX_USERNAME_LENGTH) return false;
+    res.status(400).json({ message: `Brukernavnet kan ha høyst ${MAX_USERNAME_LENGTH} tegn.` });
+    return true;
+  }
+
   router.get('/config', async (req, res) => {
     const config = await fetchHubConfig();
     sendHeartbeat(req, config);
@@ -462,6 +470,7 @@ export default function createCmsRoutes({
     if (!username || !password) {
       return res.status(400).json({ message: 'Username and password required' });
     }
+    if (refuseLongUsername(res, username)) return;
     if (refuseWeakPassword(res, password)) return;
     const result = await store.createUser(username, password, { rank, name, email, avatarUrl });
     if (!result.ok) {
@@ -472,6 +481,8 @@ export default function createCmsRoutes({
 
   router.put('/admin/users/:id', adminAuth, async (req, res) => {
     const password = req.body?.password;
+    const username = req.body?.username;
+    if (username !== undefined && username !== null && refuseLongUsername(res, username)) return;
     if (password !== undefined && password !== null && password !== '' && refuseWeakPassword(res, password)) return;
     const result = await store.updateUser(req.params.id, req.body || {});
     if (!result.ok) return res.status(400).json({ message: result.error });

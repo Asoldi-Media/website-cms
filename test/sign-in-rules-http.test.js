@@ -335,6 +335,37 @@ test('sign-in bodies that are not text, or too long, get 400 and the account lim
   }
 });
 
+test('staff usernames longer than sign-in accepts are refused when created or renamed', async () => {
+  clearAuthEnv();
+  process.env.CMS_ADMIN_PASSWORD = 'username-test-password';
+  const root = tempRoot();
+  const TOO_LONG = 'Brukernavnet kan ha høyst 200 tegn.';
+  try {
+    await withCms({ dataPath: root }, async (base) => {
+      const admin = (await login(base, 'admin', 'username-test-password')).body.token;
+      const created = await send(base, 'POST', '/admin/users', admin, { username: 'u'.repeat(201), password: 'staff-own-password', rank: 'employee' });
+      assert.equal(created.status, 400);
+      assert.equal(created.body.message, TOO_LONG);
+      assert.deepEqual((await send(base, 'GET', '/admin/users', admin)).body, [], 'no user is created');
+      // 200 characters is the longest; spaces at the ends are not stored, so they do not count.
+      const longest = 's'.repeat(200);
+      const ok = await send(base, 'POST', '/admin/users', admin, { username: ` ${longest} `, password: 'staff-own-password', rank: 'employee' });
+      assert.equal(ok.status, 201);
+      assert.equal(ok.body.username, longest);
+      assert.equal((await login(base, longest, 'staff-own-password')).status, 200, 'the longest username signs in');
+      const renamed = await send(base, 'PUT', `/admin/users/${ok.body.id}`, admin, { username: `${longest}x` });
+      assert.equal(renamed.status, 400);
+      assert.equal(renamed.body.message, TOO_LONG);
+      assert.equal((await login(base, longest, 'staff-own-password')).status, 200, 'a refused rename keeps the username');
+      assert.equal((await send(base, 'PUT', `/admin/users/${ok.body.id}`, admin, { username: 'staff-short', name: 'Staff' })).status, 200);
+      assert.equal((await login(base, 'staff-short', 'staff-own-password')).status, 200);
+    });
+  } finally {
+    clearAuthEnv();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('change-password refuses a current password that is not text and a new one that is too long', async () => {
   clearAuthEnv();
   const root = siteWithAdmin('owner', 'change-test-password');
