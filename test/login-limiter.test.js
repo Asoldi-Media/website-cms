@@ -1,11 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import v8 from 'node:v8';
+import vm from 'node:vm';
 import {
+  MAX_PASSWORD_LENGTH,
+  MAX_USERNAME_LENGTH,
   clientIpFromRequest,
   createLoginLimiter,
   isProxyAddress,
+  readLoginBody,
   trustedProxyHops,
 } from '../server/auth-hardening.js';
+
+/** Account keys hold a short hash of the trimmed, lower-cased username, never the username itself. */
+const accountKeyOf = (name) => `a:${createHash('sha256').update(name.trim().toLowerCase()).digest('hex').slice(0, 32)}`;
 
 const WINDOW = 15 * 60 * 1000;
 const request = (remoteAddress, forwardedFor) => ({
@@ -84,10 +93,10 @@ test('at the cap, IP keys and unknown usernames go first, oldest first', () => {
   for (let n = 0; n < 20; n += 1) limiter.fail(`spray-${n}`, `198.51.100.${n}`, { knownAccount: false });
   const keys = limiter.keys();
   assert.ok(keys.length <= 10, String(keys.length));
-  assert.ok(keys.includes('a:owner'), 'the real account stays');
-  assert.ok(!keys.includes('a:ghost'), 'an old unknown username goes');
+  assert.ok(keys.includes(accountKeyOf('owner')), 'the real account stays');
+  assert.ok(!keys.includes(accountKeyOf('ghost')), 'an old unknown username goes');
   assert.ok(!keys.includes('i:203.0.113.1') && !keys.includes('i:203.0.113.2'), 'old IP keys go');
-  assert.ok(keys.includes('a:spray-19') && keys.includes('i:198.51.100.19'), 'the newest keys stay');
+  assert.ok(keys.includes(accountKeyOf('spray-19')) && keys.includes('i:198.51.100.19'), 'the newest keys stay');
 });
 
 test('a known account stays protected when later attempts look unknown (case, spacing)', () => {
@@ -95,7 +104,7 @@ test('a known account stays protected when later attempts look unknown (case, sp
   limiter.fail('Owner', '', { knownAccount: true });
   limiter.fail(' owner ', '', { knownAccount: false });
   for (let n = 0; n < 10; n += 1) limiter.fail(`spray-${n}`, '', { knownAccount: false });
-  assert.ok(limiter.keys().includes('a:owner'));
+  assert.ok(limiter.keys().includes(accountKeyOf('owner')));
 });
 
 test('when only real accounts inside their window are left, new attempts are refused (fails closed)', () => {
@@ -107,7 +116,7 @@ test('when only real accounts inside their window are left, new attempts are ref
   assert.ok(refused.retryAfterSec > 0 && refused.retryAfterSec <= WINDOW / 1000);
   assert.equal(limiter.check('a5', '').ok, false);
   limiter.fail('a5', '', { knownAccount: true });
-  assert.deepEqual(limiter.keys().sort(), ['a:a1', 'a:a2', 'a:a3', 'a:a4'], 'no real account was dropped');
+  assert.deepEqual(limiter.keys().sort(), ['a1', 'a2', 'a3', 'a4'].map(accountKeyOf).sort(), 'no real account was dropped');
   assert.equal(limiter.begin('a1', '').ok, true, 'an account already in the table can still try');
   t += WINDOW;
   assert.equal(limiter.begin('stranger', '203.0.113.9', { knownAccount: false }).ok, true, 'room again once the window passed');
@@ -133,4 +142,59 @@ test('begin counts an attempt before the password check; succeed takes it back a
   assert.equal(limiter.begin('u5', ip).ok, false);
   t += WINDOW;
   assert.equal(limiter.begin('u5', ip).ok, true, 'the window slides');
+});
+
+test('sign-in bodies: the username and password must be non-empty text of a bounded length', () => {
+  assert.deepEqual(readLoginBody({ username: 'admin', password: 'pw' }), { username: 'admin', password: 'pw' });
+  const missing = [
+    undefined, null, 'admin', [], {}, { username: 'admin' }, { password: 'pw' },
+    { username: '', password: 'pw' }, { username: 'admin', password: '' },
+    { username: ['admin'], password: 'pw' }, { username: { $ne: 1 }, password: 'pw' }, { username: 7, password: 'pw' },
+    { username: 'admin', password: ['x'] }, { username: 'admin', password: {} }, { username: 'admin', password: 123 }, { username: 'admin', password: true },
+  ];
+  for (const body of missing) assert.equal(readLoginBody(body).error, 'Username and password required', JSON.stringify(body));
+  assert.equal(MAX_USERNAME_LENGTH, 200);
+  assert.equal(MAX_PASSWORD_LENGTH, 1024);
+  assert.equal(readLoginBody({ username: 'u'.repeat(200), password: 'p'.repeat(1024) }).error, undefined);
+  assert.equal(readLoginBody({ username: 'u'.repeat(201), password: 'pw' }).error, 'Username or password is too long');
+  assert.equal(readLoginBody({ username: 'admin', password: 'p'.repeat(1025) }).error, 'Username or password is too long');
+});
+
+function collectGarbage() {
+  if (typeof globalThis.gc === 'function') return globalThis.gc;
+  try {
+    v8.setFlagsFromString('--expose-gc');
+    return vm.runInNewContext('gc');
+  } catch {
+    return null;
+  }
+}
+
+test('very long usernames are kept as short hashes, so limiter memory stays small', () => {
+  const gc = collectGarbage();
+  const heapUsed = () => {
+    gc?.();
+    return process.memoryUsage().heapUsed;
+  };
+  const limiter = createLoginLimiter();
+  const before = heapUsed();
+  for (let i = 0; i < 50; i += 1) {
+    const verdict = limiter.begin(`${i}-${'u'.repeat(1_900_000)}`, `203.0.113.${i % 8}`, { knownAccount: false });
+    assert.equal(verdict.ok, true);
+    verdict.ticket.fail();
+  }
+  const keys = limiter.keys();
+  assert.equal(keys.length, 58, '50 usernames and 8 addresses');
+  for (const key of keys) assert.ok(key.length <= 40, `a key of ${key.length} characters`);
+  if (gc) {
+    const grown = heapUsed() - before;
+    assert.ok(grown < 20 * 1024 * 1024, `the heap grew by ${Math.round(grown / 1024 / 1024)} MB`);
+  }
+  // Only the first 1024 characters count, so names that differ later share one key (and one limit).
+  for (let i = 0; i < 2; i += 1) limiter.begin(`z-${'u'.repeat(2000)}${i}`, '', { knownAccount: false }).ticket.fail();
+  assert.equal(limiter.keys().length, 59);
+  // The same username, in other case or with spaces at the ends, is the same key.
+  const t = limiter.begin('  Owner ', '', { knownAccount: true });
+  t.ticket.fail();
+  assert.equal(limiter.keys().filter((key) => key === accountKeyOf('owner')).length, 1);
 });

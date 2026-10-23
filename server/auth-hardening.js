@@ -2,14 +2,15 @@
  * Admin sign-in hardening for the client CMS.
  *
  * - Tokens: HMAC compared in constant time; every token carries `exp`.
- * - Logins: attempts are limited per account and per client IP. The client IP
- *   is the X-Forwarded-For hop the local proxy appended (CMS_TRUSTED_PROXY_HOPS).
+ * - Logins: the username and password must be text of a bounded length. Attempts
+ *   are limited per account and per client IP. The client IP is the
+ *   X-Forwarded-For hop the local proxy appended (CMS_TRUSTED_PROXY_HOPS).
  * - Public config: only an explicit list of keys reaches GET /api/cms/config.
  * - First admin: never a built-in password; a random one is written to
  *   <data>/cms/private/initial-admin.json until the hub sets the real one.
  * - New passwords: 8 to 1024 characters (not counting spaces at the ends) and not a known default.
  */
-import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { join } from 'path';
 import { ensurePrivateDir, writePrivateFile } from './secret.js';
 
@@ -56,8 +57,22 @@ export function createTokenSigner(secret, { ttlMs = TOKEN_TTL_MS, now = () => Da
   };
 }
 
+export const MAX_USERNAME_LENGTH = 200;
 export const MAX_PASSWORD_LENGTH = 1024;
 const MAX_ADDRESS_LENGTH = 64;
+const MAX_HASHED_INPUT = 1024;
+
+/** `{ username, password }` from a sign-in body, or `{ error }` when either is missing, not text or too long. */
+export function readLoginBody(body) {
+  const { username, password } = body && typeof body === 'object' ? body : {};
+  if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) {
+    return { error: 'Username and password required' };
+  }
+  if (username.length > MAX_USERNAME_LENGTH || password.length > MAX_PASSWORD_LENGTH) {
+    return { error: 'Username or password is too long' };
+  }
+  return { username, password };
+}
 
 function normalizeAddress(value) {
   let address = String(value ?? '').trim();
@@ -109,8 +124,13 @@ export function clientIpFromRequest(req, { hops = trustedProxyHops() } = {}) {
  *   most `maxKeys` keys: when it is full, expired keys go first, then IP keys and keys for usernames
  *   that do not exist (oldest first). A real account's key is never dropped inside its window; when
  *   only those are left, new attempts are refused until room frees up.
+ * - Memory stays bounded: usernames are kept as short hashes, addresses are capped, every key keeps at
+ *   most its limit of timestamps, and the table holds at most `maxKeys` keys.
  * - `check`, `fail` and `succeed` are the same steps without a ticket.
  */
+const shortHash = (text) => createHash('sha256').update(text).digest('hex').slice(0, 32);
+const accountName = (account) => String(account ?? '').slice(0, MAX_HASHED_INPUT).trim().toLowerCase();
+
 export function createLoginLimiter({
   windowMs = 15 * 60 * 1000,
   maxPerAccount = 10,
@@ -121,15 +141,21 @@ export function createLoginLimiter({
   /** key -> { times: ascending attempt times inside the window, known: true for a real account's key } */
   const entries = new Map();
 
-  const accountKey = (account) => `a:${String(account ?? '').trim().toLowerCase()}`;
+  const accountKey = (name) => `a:${shortHash(name)}`;
   const ipKey = (ip) => `i:${normalizeAddress(ip)}`;
   const limitOf = (key) => (key.startsWith('a:') ? maxPerAccount : maxPerIp);
 
   function keysFor(account, ip) {
     const keys = [];
-    if (String(account ?? '').trim()) keys.push(accountKey(account));
+    const name = accountName(account);
+    if (name) keys.push(accountKey(name));
     if (normalizeAddress(ip)) keys.push(ipKey(ip));
     return keys;
+  }
+
+  function forget(account) {
+    const name = accountName(account);
+    if (name) entries.delete(accountKey(name));
   }
 
   function recent(key) {
@@ -224,7 +250,7 @@ export function createLoginLimiter({
             if (settled) return;
             settled = true;
             unrecord(keys, t);
-            if (String(account ?? '').trim()) entries.delete(accountKey(account));
+            forget(account);
           },
         },
       };
@@ -244,7 +270,7 @@ export function createLoginLimiter({
       record(keys, now(), knownAccount);
     },
     succeed(account) {
-      if (String(account ?? '').trim()) entries.delete(accountKey(account));
+      forget(account);
     },
     /** Keys now held (tests and diagnostics). */
     keys() {

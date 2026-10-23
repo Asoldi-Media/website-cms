@@ -33,6 +33,7 @@ import {
 } from './forms.js';
 import { resolveCmsSecrets } from './secret.js';
 import {
+  MAX_PASSWORD_LENGTH,
   SHIPPED_DEFAULT_PASSWORDS,
   createLoginLimiter,
   createTokenSigner,
@@ -41,6 +42,7 @@ import {
   newPasswordProblem,
   publicConfig,
   randomAdminPassword,
+  readLoginBody,
   writeInitialAdmin,
 } from './auth-hardening.js';
 
@@ -83,6 +85,32 @@ function applyDevFlags(features) {
   return next;
 }
 
+/**
+ * Express 4 does not catch a rejected async handler, and Node then ends the process. Every handler this
+ * router registers answers 500 instead, so one failing request (a full disk, a bad body) never takes the
+ * site down or empties the in-memory sign-in limits.
+ */
+function answerAsyncErrors(router) {
+  const settle = (handler) => {
+    if (typeof handler !== 'function' || handler.length >= 4) return handler;
+    return function settled(req, res, next) {
+      const result = handler.call(this, req, res, next);
+      if (result && typeof result.catch === 'function') {
+        result.catch((error) => {
+          console.error(`[cms] ${req.method} ${req.originalUrl || req.url} failed:`, error?.message || error);
+          if (!res.headersSent) res.status(500).json({ message: 'Request failed' });
+        });
+      }
+      return result;
+    };
+  };
+  for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
+    const register = router[method].bind(router);
+    router[method] = (path, ...handlers) => register(path, ...handlers.map(settle));
+  }
+  return router;
+}
+
 function withPackageVersion(data) {
   return {
     ...fallbackConfig(),
@@ -105,7 +133,7 @@ export default function createCmsRoutes({
 } = {}) {
   const resolvedDataPath = resolveCmsDataPath({ dataPath, siteKey });
   const tokens = createTokenSigner(adminSecret || resolveCmsSecrets({ dataPath: resolvedDataPath }).adminSecret);
-  const router = express.Router();
+  const router = answerAsyncErrors(express.Router());
   const store = createStore(resolvedDataPath);
   const emailTemplates = createEmailTemplateStore(resolvedDataPath);
 
@@ -356,29 +384,41 @@ export default function createCmsRoutes({
     });
   });
 
-  router.post('/admin/login', async (req, res) => {
-    const { username, password } = req.body || {};
-    if (!username || !password) {
-      return res.status(400).json({ message: 'Username and password required' });
+  /** Runs a password check for a ticket from guardLogin: an error answers 500 and the attempt stays counted. */
+  async function settleSignIn(attempt, res, label, check) {
+    try {
+      await check();
+    } catch (error) {
+      console.error(`[cms] ${label} failed:`, error?.message || error);
+      if (!res.headersSent) res.status(500).json({ message: 'Sign-in failed' });
+    } finally {
+      attempt.fail(); // no-op after succeed()
     }
+  }
+
+  router.post('/admin/login', async (req, res) => {
+    const { username, password, error } = readLoginBody(req.body);
+    if (error) return res.status(400).json({ message: error });
     await adminReady;
     const attempt = guardLogin(loginLimiter, req, res, username, { knownAccount: await isKnownAccount(username) });
     if (!attempt) return;
-    const valid = await store.verifyAdmin(username, password);
-    if (valid) {
+    await settleSignIn(attempt, res, 'Admin sign-in', async () => {
+      const valid = await store.verifyAdmin(username, password);
+      if (valid) {
+        attempt.succeed();
+        const token = signToken({ role: 'admin', username, rank: 'admin', at: Date.now() });
+        return res.json({ token, rank: 'admin', username, name: username });
+      }
+      const staff = await store.verifyEmployee(username, password);
+      if (!staff.ok) {
+        attempt.fail();
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
       attempt.succeed();
-      const token = signToken({ role: 'admin', username, rank: 'admin', at: Date.now() });
-      return res.json({ token, rank: 'admin', username, name: username });
-    }
-    const staff = await store.verifyEmployee(username, password);
-    if (!staff.ok) {
-      attempt.fail();
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
-    attempt.succeed();
-    const rank = normalizeRank(staff.user.rank);
-    const token = signToken({ role: 'staff', userId: staff.user.id, username: staff.user.username, rank, at: Date.now() });
-    return res.json({ token, rank, username: staff.user.username, name: staff.user.name || staff.user.username });
+      const rank = normalizeRank(staff.user.rank);
+      const token = signToken({ role: 'staff', userId: staff.user.id, username: staff.user.username, rank, at: Date.now() });
+      return res.json({ token, rank, username: staff.user.username, name: staff.user.name || staff.user.username });
+    });
   });
 
   router.get('/admin/me', anyAuth, (req, res) => {
@@ -429,6 +469,9 @@ export default function createCmsRoutes({
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ message: 'Current and new password required' });
     }
+    if (typeof currentPassword !== 'string' || currentPassword.length > MAX_PASSWORD_LENGTH) {
+      return res.status(400).json({ message: 'Current password is not valid' });
+    }
     if (refuseWeakPassword(res, newPassword)) return;
     const attempt = guardLogin(loginLimiter, req, res, req.actor.username);
     if (!attempt) return;
@@ -436,40 +479,42 @@ export default function createCmsRoutes({
       attempt.fail();
       return res.status(401).json({ message: 'Current password is wrong' });
     };
-    if (req.actor.rank === 'admin') {
-      const valid = await store.verifyAdmin(req.actor.username, currentPassword);
+    await settleSignIn(attempt, res, 'Password change', async () => {
+      if (req.actor.rank === 'admin') {
+        const valid = await store.verifyAdmin(req.actor.username, currentPassword);
+        if (!valid) return wrongCurrent();
+        attempt.succeed();
+        const admin = await store.getAdmin();
+        if (!admin) return res.status(500).json({ message: 'Admin not found' });
+        await store.setAdminCredentials(admin.username, newPassword);
+        return res.json({ ok: true });
+      }
+      const user = store.getUserById(req.actor.userId);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      const valid = await store.verifyPassword(currentPassword, user.passwordHash);
       if (!valid) return wrongCurrent();
       attempt.succeed();
-      const admin = await store.getAdmin();
-      if (!admin) return res.status(500).json({ message: 'Admin not found' });
-      await store.setAdminCredentials(admin.username, newPassword);
+      await store.updateUserPassword(user.id, newPassword);
       return res.json({ ok: true });
-    }
-    const user = store.getUserById(req.actor.userId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-    const valid = await store.verifyPassword(currentPassword, user.passwordHash);
-    if (!valid) return wrongCurrent();
-    attempt.succeed();
-    await store.updateUserPassword(user.id, newPassword);
-    res.json({ ok: true });
+    });
   });
 
   router.post('/auth/login', async (req, res) => {
-    const { username, password } = req.body || {};
-    if (!username || !password) {
-      return res.status(400).json({ message: 'Username and password required' });
-    }
+    const { username, password, error } = readLoginBody(req.body);
+    if (error) return res.status(400).json({ message: error });
     await adminReady;
     const attempt = guardLogin(loginLimiter, req, res, username, { knownAccount: await isKnownAccount(username) });
     if (!attempt) return;
-    const result = await store.verifyEmployee(username, password);
-    if (!result.ok) {
-      attempt.fail();
-      return res.status(401).json({ message: 'Invalid username or password' });
-    }
-    attempt.succeed();
-    const token = signToken({ role: 'employee', userId: result.user.id, at: Date.now() });
-    res.json({ token, user: result.user });
+    await settleSignIn(attempt, res, 'Staff sign-in', async () => {
+      const result = await store.verifyEmployee(username, password);
+      if (!result.ok) {
+        attempt.fail();
+        return res.status(401).json({ message: 'Invalid username or password' });
+      }
+      attempt.succeed();
+      const token = signToken({ role: 'employee', userId: result.user.id, at: Date.now() });
+      return res.json({ token, user: result.user });
+    });
   });
 
   // The index (alt text, who uploaded) is private — everything else in uploads/ is public media.
