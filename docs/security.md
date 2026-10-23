@@ -44,6 +44,10 @@ Asoldi staff open the CMS from the hub with a one-time link, `GET /api/cms/admin
 - Failed links count per client address like sign-ins: after 10 in 15 minutes the answer is `429` with `Retry-After`, and the hub is not asked.
 - A successful sign-in is an 8-hour admin session as `asoldi-support`, recorded in `cms/audit.json` (who, when, address), which admins see under `GET /api/cms/admin/audit`.
 
+## Passwords
+
+New admin and staff passwords (`POST /api/cms/admin/change-password`, `POST /api/cms/admin/users`, `PUT /api/cms/admin/users/:id`) must be text of 8 to 1024 characters and not on the common-password list in `server/secret.js`; anything else gets `400`. The Asoldi hub applies the same rule to the client admin it sets.
+
 ## Sign-in limits
 
 `POST /api/cms/admin/login` and `POST /api/cms/auth/login` count failed attempts over 15 minutes:

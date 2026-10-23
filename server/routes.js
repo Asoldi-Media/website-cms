@@ -37,9 +37,9 @@ import { contentRuntimeScript } from './content-runtime.js';
 import { extractSlotMapFromHtml } from './slot-map.js';
 import { contentCoverage, resolvePublicHtml } from './html-tracker.js';
 import { cmsCapabilities } from './capabilities.js';
-import { clearInitialAdminFile, initialAdminCredentials, readInitialAdminFile, resolveCmsSecrets, writeInitialAdminFile, DEFAULT_ADMIN_PASSWORDS } from './secret.js';
+import { clearInitialAdminFile, initialAdminCredentials, isUsableAdminPassword, readInitialAdminFile, resolveCmsSecrets, writeInitialAdminFile, DEFAULT_ADMIN_PASSWORDS } from './secret.js';
 import { createTokenSigner, LOCAL_TOKEN_MS, LOGIN_TOKEN_MS } from './admin-token.js';
-import { createLoginLimiter, clientAddressMode, clientIp, guardLogin, readLoginBody } from './login-limiter.js';
+import { createLoginLimiter, clientAddressMode, clientIp, guardLogin, readLoginBody, MAX_PASSWORD_LENGTH } from './login-limiter.js';
 import { publicConfig, readPackageBuild } from './public-config.js';
 import { applyFieldMap, errorMessageFor, formsRuntimeScript, looksLikeBot, publicSubmission, safeReturnPath, successMessageFor, wantsJson, } from './forms.js';
 export { resolveCmsDataPath } from './data-path.js';
@@ -55,6 +55,11 @@ const PACKAGE_VERSION = (() => {
     }
 })();
 const PACKAGE_BUILD = readPackageBuild();
+const PASSWORD_RULE = 'Choose a password with at least 8 characters that is not a common default.';
+/** New admin and staff passwords: text, 8 to 1024 characters, not a well-known default. */
+function acceptablePassword(value) {
+    return typeof value === 'string' && value.length <= MAX_PASSWORD_LENGTH && isUsableAdminPassword(value);
+}
 function fallbackConfig() {
     const devEcommerce = process.env.CMS_DEV_ECOMMERCE === '1';
     const publicUrl = String(process.env.CMS_PUBLIC_URL || '').trim();
@@ -554,6 +559,10 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
             res.status(400).json({ message: 'Username and password required' });
             return;
         }
+        if (!acceptablePassword(password)) {
+            res.status(400).json({ message: PASSWORD_RULE });
+            return;
+        }
         const result = await store.createUser(username, password, { rank, name, email, avatarUrl });
         if (!result.ok) {
             res.status(400).json({ message: result.error });
@@ -562,7 +571,12 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
         res.status(201).json(result.user);
     });
     router.put('/admin/users/:id', adminAuth, async (req, res) => {
-        const result = await store.updateUser(req.params.id, req.body || {});
+        const patch = req.body || {};
+        if (patch.password !== undefined && patch.password !== '' && patch.password !== null && !acceptablePassword(patch.password)) {
+            res.status(400).json({ message: PASSWORD_RULE });
+            return;
+        }
+        const result = await store.updateUser(req.params.id, patch);
         if (!result.ok) {
             res.status(400).json({ message: result.error });
             return;
@@ -585,6 +599,10 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
         const { currentPassword, newPassword } = req.body || {};
         if (!currentPassword || !newPassword) {
             res.status(400).json({ message: 'Current and new password required' });
+            return;
+        }
+        if (!acceptablePassword(newPassword)) {
+            res.status(400).json({ message: PASSWORD_RULE });
             return;
         }
         if (req.actor.rank === 'admin') {
