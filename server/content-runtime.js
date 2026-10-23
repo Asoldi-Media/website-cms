@@ -114,6 +114,7 @@ function postBody(post){
   }).join('\\n');
 }
 function coverUrl(post){
+  if (post && compact(post.featuredImage)) return compact(post.featuredImage);
   var blocks=(post && post.blocks)||[];
   for (var i=0;i<blocks.length;i++){
     if (blocks[i] && blocks[i].type==='image' && compact(blocks[i].url)) return compact(blocks[i].url);
@@ -121,6 +122,10 @@ function coverUrl(post){
   return '';
 }
 function excerpt(post){
+  if (post && compact(post.excerpt)) {
+    var written=compact(post.excerpt);
+    return written.length>160?written.slice(0,159)+'…':written;
+  }
   var blocks=(post && post.blocks)||[];
   var first=null;
   for (var i=0;i<blocks.length;i++) if (blocks[i] && blocks[i].type!=='image'){ first=blocks[i]; break; }

@@ -23,41 +23,46 @@ const PAGES = [
   { id: 'payments', label: 'Betaling' },
 ];
 
-/** Shop admin with one sub-page per area. */
-export function EcommercePanel({ catalogType, authHeaders, loading, setLoading, isOwner = true }) {
-  const [page, setPage] = useState(() => (new URLSearchParams(window.location.search).has('payments') ? 'payments' : 'overview'));
+/** Shop admin. The shell passes `page`; without it, the old tab row is the fallback. */
+export function EcommercePanel({ catalogType, authHeaders, loading, setLoading, isOwner = true, page, onPage }) {
+  const [localPage, setLocalPage] = useState(() => (new URLSearchParams(window.location.search).has('payments') ? 'payments' : 'overview'));
+  const current = page || localPage;
+  const setPage = onPage || setLocalPage;
   const shared = { authHeaders, loading, setLoading, isOwner };
+  const title = PAGES.find((item) => item.id === current)?.label || 'Nettbutikk';
 
   return (
     <div className="max-w-6xl">
-      <h1 className="text-2xl font-bold text-white mb-2">Nettbutikk</h1>
-      <div className="flex flex-wrap gap-1 mb-6 border-b border-white/10 pb-3">
-        {PAGES.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => setPage(item.id)}
-            className={`px-3 py-2 rounded-t-lg text-sm font-medium ${
-              page === item.id ? 'bg-[#2a2a2a] text-white border border-white/10 border-b-transparent' : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-      {page === 'overview' && <ShopOverviewPanel {...shared} onOpen={setPage} />}
-      {page === 'products' && <ProductsPanel catalogType={catalogType} {...shared} />}
-      {page === 'orders' && <OrdersPanel catalogType={catalogType} {...shared} />}
-      {page === 'bookings' && <ShopBookingsPanel {...shared} />}
-      {page === 'customers' && <ShopCustomersPanel {...shared} />}
-      {page === 'discounts' && <ShopDiscountsPanel {...shared} />}
-      {page === 'giftcards' && <ShopGiftcardsPanel {...shared} />}
-      {page === 'subscriptions' && <ShopSubscriptionsPanel {...shared} />}
-      {page === 'reviews' && <ShopReviewsPanel {...shared} />}
-      {page === 'abandoned' && <ShopAbandonedPanel {...shared} />}
-      {page === 'settings' && <ShopSettingsPanel {...shared} />}
-      {page === 'files' && <ShopFilesPanel {...shared} />}
-      {page === 'payments' && <PaymentsPanel {...shared} />}
+      <h1 className="text-xl font-semibold text-[#1a1c1e] mb-4">{title}</h1>
+      {!page && (
+        <div className="flex flex-wrap gap-1 mb-6 border-b border-[#e3e3e3] pb-3">
+          {PAGES.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setPage(item.id)}
+              className={`px-3 py-2 rounded-lg text-sm font-medium ${
+                current === item.id ? 'bg-white text-[#1a1c1e] border border-[#e3e3e3] shadow-sm' : 'text-[#6d7175] hover:text-[#1a1c1e]'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {current === 'overview' && <ShopOverviewPanel {...shared} onOpen={setPage} />}
+      {current === 'products' && <ProductsPanel catalogType={catalogType} {...shared} />}
+      {current === 'orders' && <OrdersPanel catalogType={catalogType} {...shared} />}
+      {current === 'bookings' && <ShopBookingsPanel {...shared} />}
+      {current === 'customers' && <ShopCustomersPanel {...shared} />}
+      {current === 'discounts' && <ShopDiscountsPanel {...shared} />}
+      {current === 'giftcards' && <ShopGiftcardsPanel {...shared} />}
+      {current === 'subscriptions' && <ShopSubscriptionsPanel {...shared} />}
+      {current === 'reviews' && <ShopReviewsPanel {...shared} />}
+      {current === 'abandoned' && <ShopAbandonedPanel {...shared} />}
+      {current === 'settings' && <ShopSettingsPanel {...shared} />}
+      {current === 'files' && <ShopFilesPanel {...shared} />}
+      {current === 'payments' && <PaymentsPanel {...shared} />}
     </div>
   );
 }

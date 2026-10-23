@@ -38,11 +38,12 @@ function KindBadge({ kind, isTemplate }) {
     return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs border ${tone}`}>{KIND_LABEL[kind] || kind}</span>;
 }
 /** Pages, forms, and the inbox from the site seed. */
-export function GeneralPanel({ authHeaders, loading, setLoading, siteName = '' }) {
-    const [view, setView] = useState('pages');
+export function GeneralPanel({ authHeaders, loading, setLoading, siteName = '', start = 'forms' }) {
+    const [view, setView] = useState(start === 'pages' ? 'pages' : 'forms');
     const [site, setSite] = useState(null);
     const [submissions, setSubmissions] = useState([]);
     const [formFilter, setFormFilter] = useState('');
+    const [query, setQuery] = useState('');
     const [error, setError] = useState('');
     const load = useCallback(async () => {
         setError('');
@@ -79,7 +80,14 @@ export function GeneralPanel({ authHeaders, loading, setLoading, siteName = '' }
     const inboxForms = forms.filter((f) => f.destination?.type === 'inbox');
     const listForms = forms.filter((f) => f.destination?.type === 'list');
     const unreadTotal = submissions.filter((s) => !s.read).length;
-    const visibleSubmissions = formFilter ? submissions.filter((s) => s.formId === formFilter) : submissions;
+    const visibleSubmissions = submissions.filter((s) => {
+        if (formFilter && s.formId !== formFilter)
+            return false;
+        const q = query.trim().toLowerCase();
+        if (!q)
+            return true;
+        return `${s.name} ${s.email} ${s.subject} ${s.message}`.toLowerCase().includes(q);
+    });
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     const pageUrl = (route) => `${origin}${route === '/' ? '/' : route}`;
     async function markRead(id, read) {
@@ -113,7 +121,7 @@ export function GeneralPanel({ authHeaders, loading, setLoading, siteName = '' }
     return (<div className="max-w-6xl">
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-white">General</h1>
+          <h1 className="text-xl font-semibold text-[#1a1c1e]">{view === 'forms' ? 'Forms' : 'Pages'}</h1>
           <p className="text-gray-400 text-sm mt-1">
             {siteName || site?.site?.name || 'This site'} — pages and the forms wired to this CMS.
             {site?.generatedAt ? ` Structure from Website Creator, ${new Date(site.generatedAt).toLocaleDateString()}.` : ''}
@@ -202,9 +210,20 @@ export function GeneralPanel({ authHeaders, loading, setLoading, siteName = '' }
             </div>
           </div>
 
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-sm font-medium text-white">Inbox {formFilter ? <span className="text-gray-400">· filtered</span> : null}</h2>
-            {formFilter && (<button type="button" onClick={() => setFormFilter('')} className="text-xs text-[#FF5B00] hover:underline">Show all</button>)}
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <h2 className="text-sm font-medium text-[#1a1c1e]">Inbox{unreadTotal ? ` · ${unreadTotal} new` : ''}{formFilter ? <span className="text-[#6d7175]"> · filtered</span> : null}</h2>
+            <div className="flex items-center gap-2">
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search messages" className="px-3 py-1.5 rounded-lg bg-white border border-[#c9cccf] text-sm text-[#1a1c1e]"/>
+              <button type="button" className="text-xs text-[#FF5B00]" onClick={() => {
+                const header = ['createdAt', 'name', 'email', 'subject', 'message', 'form', 'page', 'read'];
+                const lines = [header.join(',')].concat(visibleSubmissions.map((s) => [s.createdAt, s.name, s.email, s.subject, s.message, s.formLabel || s.formId, s.page, s.read].map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`).join(',')));
+                const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                Object.assign(document.createElement('a'), { href: url, download: 'inbox.csv' }).click();
+                URL.revokeObjectURL(url);
+            }}>Export</button>
+              {formFilter && (<button type="button" onClick={() => setFormFilter('')} className="text-xs text-[#FF5B00] hover:underline">Show all</button>)}
+            </div>
           </div>
           <div className="space-y-2">
             {visibleSubmissions.map((s) => (<div key={s.id} className={`rounded-xl border p-4 ${s.read ? 'bg-[#242424] border-white/5' : 'bg-[#2a2a2a] border-[#FF5B00]/30'}`}>

@@ -193,14 +193,14 @@ export function AnalyticsPanel({ authHeaders, loading, setLoading }) {
       <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-[#FF5B00]">Analyse</p>
-          <h1 className="text-3xl font-bold text-white mt-1">
+          <h1 className="text-xl font-semibold text-[#1a1c1e] mt-1">
             {advanced ? 'Nettbutikk-analyse' : 'SEO-analyse'}
           </h1>
           <p className="text-gray-400 text-sm mt-1">
             {data?.subject?.name || 'Denne nettsiden'} · {data?.subject?.address || 'Adresse fra kundekortet'}
           </p>
         </div>
-        <div className="flex flex-wrap gap-1 rounded-full bg-black/30 p-1">
+        <div className="flex flex-wrap gap-1 rounded-full bg-white border border-[#e3e3e3] p-1">
           {RANGES.map((entry) => (<button key={entry.id} type="button" onClick={() => applyRange(entry.id)} className={`px-3 py-1.5 rounded-full text-xs ${range === entry.id ? 'bg-[#FF5B00] text-white' : 'text-gray-400 hover:text-white'}`}>
               {entry.label}
             </button>))}
@@ -286,7 +286,17 @@ export function AnalyticsPanel({ authHeaders, loading, setLoading }) {
             </div>)}
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-2xl border border-white/10 overflow-hidden">
-              <div className="px-4 py-3 border-b border-white/10 text-sm text-white">Mest besøkte sider</div>
+              <div className="px-4 py-3 border-b border-white/10 text-sm text-[#1a1c1e] flex justify-between">
+                <span>Mest besøkte sider</span>
+                <button type="button" className="text-xs text-[#FF5B00]" onClick={() => {
+                  const rows = traffic.topPages || [];
+                  const lines = ['path,views'].concat(rows.map((row) => `${row.path},${row.count}`));
+                  const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+                  const url = URL.createObjectURL(blob);
+                  Object.assign(document.createElement('a'), { href: url, download: 'pages.csv' }).click();
+                  URL.revokeObjectURL(url);
+                }}>Export</button>
+              </div>
               <table className="w-full text-sm">
                 <tbody>
                   {(traffic.topPages || []).map((row) => (<tr key={row.path} className="border-t border-white/5">

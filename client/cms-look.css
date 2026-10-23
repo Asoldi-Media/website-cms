@@ -1,0 +1,50 @@
+/* Panels still use the old dark utilities. This flips the admin to a light Shopify-style canvas. */
+.cms-app {
+  background: #f6f6f7;
+  color: #1a1c1e;
+  min-height: 100vh;
+}
+.cms-app .text-white { color: #1a1c1e; }
+.cms-app .text-gray-200 { color: #303030; }
+.cms-app .text-gray-300 { color: #4a4a4a; }
+.cms-app .text-gray-400,
+.cms-app .text-gray-500 { color: #6d7175; }
+.cms-app .text-yellow-200,
+.cms-app .text-yellow-200\/80 { color: #8a6116; }
+.cms-app .text-green-300,
+.cms-app .text-emerald-400 { color: #0b7a43; }
+.cms-app .text-red-300,
+.cms-app .text-rose-400 { color: #b42318; }
+.cms-app .text-blue-200 { color: #1f5196; }
+.cms-app .bg-\[\#1e1e1e\],
+.cms-app .bg-\[\#2a2a2a\],
+.cms-app .bg-\[\#242424\],
+.cms-app .bg-\[\#232323\],
+.cms-app .bg-\[\#222\],
+.cms-app .bg-\[\#1a1a1a\],
+.cms-app .bg-\[\#0a0a0a\],
+.cms-app .bg-\[\#23282d\],
+.cms-app .bg-\[\#050505\] { background-color: #fff; }
+.cms-app .bg-black\/30 { background-color: #fff; border: 1px solid #e3e3e3; }
+.cms-app .bg-white\/10 { background-color: #f1f2f4; }
+.cms-app .bg-white\/20,
+.cms-app .hover\:bg-white\/20:hover { background-color: #e8eaed; }
+.cms-app .hover\:bg-white\/10:hover { background-color: #eceef0; }
+.cms-app .bg-black\/20 { background-color: #eef0f2; }
+.cms-app .border-white\/10,
+.cms-app .border-white\/20,
+.cms-app .border-white\/5 { border-color: #e3e3e3; }
+.cms-app .from-\[\#2d2d2d\] {
+  --tw-gradient-from: #fff var(--tw-gradient-from-position);
+  --tw-gradient-to: #fafafa var(--tw-gradient-to-position);
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
+  box-shadow: 0 1px 2px rgba(26, 28, 30, 0.06);
+}
+.cms-app .rounded-xl.border,
+.cms-app .rounded-2xl.border { box-shadow: 0 1px 2px rgba(26, 28, 30, 0.04); }
+.cms-app .bg-\[\#FF5B00\].text-white,
+.cms-app .bg-\[\#e55200\].text-white,
+.cms-app .bg-neutral-900.text-white,
+.cms-app .bg-red-600.text-white,
+.cms-app .bg-red-600\/80.text-white { color: #fff; }
+.cms-app .hover\:bg-\[\#e55200\]:hover { color: #fff; }

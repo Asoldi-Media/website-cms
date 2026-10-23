@@ -1,7 +1,11 @@
 /** Client CMS UI. Mount on `<Route path="/admin" />` with the API at `/api/cms`. */
 import { useState, useEffect, useCallback, Suspense, lazy } from 'react';
-import { Users, LogOut, LayoutDashboard, BarChart3, ShoppingBag, Newspaper, Share2, Mail, Layers, Image as ImageIcon, Pencil } from 'lucide-react';
+import { Users, LogOut, LayoutDashboard, BarChart3, ShoppingBag, ShoppingCart, Package, Newspaper, Mail, Inbox, Image as ImageIcon, Pencil, Calendar, Percent, Gift, RefreshCw, Star, Settings, FileText } from 'lucide-react';
+import { PagesPanel } from './PagesPanel.jsx';
 import { Helmet } from 'react-helmet-async';
+import './cms-look.css';
+import { ShopFilesPanel, ShopSettingsPanel } from './ShopSettingsPanel.jsx';
+import { PaymentsPanel } from './PaymentsPanel.jsx';
 import { EcommercePanel } from './EcommercePanel.jsx';
 import { BlogPanel } from './BlogPanel.jsx';
 import { AnalyticsPanel } from './AnalyticsPanel.jsx';
@@ -24,6 +28,30 @@ function authHeaders() {
     return t ? { Authorization: `Bearer ${t}` } : {};
 }
 const DEFAULT_FEATURES = { users: true, analytics: false, ecommerce: false, blog: false, socialSync: false, emailMarketing: false, general: false };
+const SHOP_MAIN = [
+    { id: 'overview', label: 'Oversikt', icon: LayoutDashboard },
+    { id: 'orders', label: 'Ordrer', icon: ShoppingCart },
+    { id: 'products', label: 'Produkter', icon: Package },
+    { id: 'customers', label: 'Kunder', icon: Users },
+];
+const SHOP_EXTRA = [
+    { id: 'bookings', label: 'Timer', icon: Calendar },
+    { id: 'discounts', label: 'Rabatter', icon: Percent },
+    { id: 'giftcards', label: 'Gavekort', icon: Gift },
+    { id: 'subscriptions', label: 'Abonnement', icon: RefreshCw },
+    { id: 'reviews', label: 'Omtaler', icon: Star },
+    { id: 'abandoned', label: 'Forlatte kasser', icon: ShoppingBag },
+];
+const EMPTY_MODULES = { bookings: false, discounts: false, giftcards: false, subscriptions: false, reviews: false, abandoned: false };
+function SideLink({ icon: Icon, label, active, onClick }) {
+    return (<button type="button" onClick={onClick} className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-left text-[13px] font-medium ${active ? 'bg-[#f1f2f4] text-[#111]' : 'text-[#303030] hover:bg-[#f6f6f7]'}`}>
+      <Icon size={16} strokeWidth={1.75} className={active ? 'text-[#FF5B00] shrink-0' : 'text-[#6d7175] shrink-0'}/>
+      <span className="truncate">{label}</span>
+    </button>);
+}
+function SideLabel({ children }) {
+    return <p className="px-2.5 pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wide text-[#8a8f98]">{children}</p>;
+}
 function firstEnabledTab(features, rank = 'admin') {
     const can = (tab) => {
         if (rank === 'member')
@@ -55,7 +83,11 @@ export function ClientCMS() {
     const [password, setPassword] = useState('');
     const [loginError, setLoginError] = useState('');
     // Stripe/PayPal onboarding returns to /admin?payments=… — open the Payments page.
-    const [tab, setTab] = useState(() => (new URLSearchParams(window.location.search).has('payments') ? 'ecommerce' : 'website'));
+    const [tab, setTab] = useState(() => (new URLSearchParams(window.location.search).has('payments') ? 'settings' : 'website'));
+    const [shopPage, setShopPage] = useState('overview');
+    const [settingsPage, setSettingsPage] = useState(() => (new URLSearchParams(window.location.search).has('payments') ? 'payments' : 'features'));
+    const [editorRoute, setEditorRoute] = useState('');
+    const [modules, setModules] = useState(EMPTY_MODULES);
     const [features, setFeatures] = useState(DEFAULT_FEATURES);
     const [catalogType, setCatalogType] = useState('normal');
     const [siteName, setSiteName] = useState('');
@@ -129,6 +161,17 @@ export function ClientCMS() {
         })
             .catch(() => setLoggedIn(false));
     }, [fetchUsers]);
+    useEffect(() => {
+        if (!loggedIn || !features.ecommerce)
+            return;
+        fetch(`${API}/shop/admin/settings`, { headers: authHeaders() })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((data) => {
+            if (data?.modules)
+                setModules({ ...EMPTY_MODULES, ...data.modules });
+        })
+            .catch(() => {});
+    }, [loggedIn, features.ecommerce]);
     const handleLogin = async (e) => {
         e.preventDefault();
         setLoginError('');
@@ -249,26 +292,27 @@ export function ClientCMS() {
         setNewPassword('');
     };
     if (loggedIn === null) {
-        return (<div className="min-h-screen bg-[#1e1e1e] flex items-center justify-center">
-        <p className="text-gray-400">Loading…</p>
+        return (<div className="cms-app min-h-screen flex items-center justify-center">
+        <p className="text-[#6d7175]">Loading…</p>
       </div>);
     }
     if (!loggedIn) {
         return (<>
         <Helmet><title>Admin</title><meta name="robots" content="noindex,nofollow"/></Helmet>
-        <div className="min-h-screen bg-[#050505] flex items-center justify-center p-6">
-          <div className="w-full max-w-sm rounded-2xl bg-[#1a1a1a] border border-white/10 p-8">
-            <h1 className="text-xl font-bold text-white mb-6">Admin</h1>
+        <div className="cms-app min-h-screen flex items-center justify-center p-6">
+          <div className="w-full max-w-sm rounded-2xl bg-white border border-[#e3e3e3] shadow-sm p-8">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[#8a8f98] mb-1">{siteName || 'Admin'}</p>
+            <h1 className="text-xl font-semibold text-[#1a1c1e] mb-6">Log in</h1>
             <form onSubmit={handleLogin} className="space-y-4">
-              <input type="text" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full px-4 py-3 rounded-lg bg-[#0a0a0a] border border-white/20 text-white placeholder-gray-500 focus:outline-none focus:border-[#FF5B00]" required/>
-              <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-4 py-3 rounded-lg bg-[#0a0a0a] border border-white/20 text-white placeholder-gray-500 focus:outline-none focus:border-[#FF5B00]" required/>
-              {loginError && <p className="text-red-400 text-sm">{loginError}</p>}
+              <input type="text" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full px-4 py-3 rounded-lg bg-white border border-[#c9cccf] text-[#1a1c1e] placeholder:text-[#8c9196] focus:outline-none focus:border-[#FF5B00] focus:ring-2 focus:ring-[#FF5B00]/20" required/>
+              <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-4 py-3 rounded-lg bg-white border border-[#c9cccf] text-[#1a1c1e] placeholder:text-[#8c9196] focus:outline-none focus:border-[#FF5B00] focus:ring-2 focus:ring-[#FF5B00]/20" required/>
+              {loginError && <p className="text-[#b42318] text-sm">{loginError}</p>}
               <button type="submit" disabled={loading} className="w-full py-3 rounded-lg font-medium text-white bg-[#FF5B00] hover:bg-[#e55200] disabled:opacity-50">
                 {loading ? 'Logging in…' : 'Log in'}
               </button>
             </form>
             <p className="mt-4 text-center">
-              <a href="/" className="text-sm text-gray-400 hover:text-white">← Back to site</a>
+              <a href="/" className="text-sm text-[#6d7175] hover:text-[#1a1c1e]">← Back to site</a>
             </p>
           </div>
         </div>
@@ -278,72 +322,88 @@ export function ClientCMS() {
     const isStaffManager = rank === 'admin' || rank === 'employee';
     const canBlog = rank === 'admin' || rank === 'employee' || rank === 'writer';
     const canDeleteStaff = rank === 'admin';
+    const openShop = (id) => {
+        setTab('ecommerce');
+        setShopPage(id);
+    };
+    const shopBlocked = SHOP_EXTRA.some((item) => item.id === shopPage) && !modules[shopPage];
+    const settingsItems = [
+        features.ecommerce && ['features', 'Features'],
+        features.ecommerce && ['store', 'Store'],
+        features.ecommerce && ['payments', 'Payments'],
+        features.ecommerce && ['shipping', 'Shipping'],
+        features.ecommerce && ['tax', 'Tax'],
+        features.ecommerce && ['checkout', 'Checkout'],
+        features.ecommerce && modules.bookings && ['bookings', 'Booking setup'],
+        features.ecommerce && ['files', 'Files'],
+        features.ecommerce && rank === 'admin' && ['test', 'Test mode'],
+        features.users !== false && ['staff', 'Staff'],
+        features.general && ['general', 'Forms'],
+        features.socialSync && ['social', 'Social'],
+    ].filter(Boolean);
     return (<>
       <Helmet><title>Admin</title><meta name="robots" content="noindex,nofollow"/></Helmet>
-      <div className="min-h-screen bg-[#1e1e1e] flex">
-        <aside className="w-56 bg-[#23282d] text-white flex flex-col fixed inset-y-0 left-0">
-          <div className="p-4 border-b border-white/10">
-            <a href="/" className="text-lg font-semibold text-white">{siteName || 'Admin'}</a>
-            <p className="text-xs text-gray-400 mt-1">Client CMS{rank && rank !== 'admin' ? ` · ${rank}` : ''}</p>
+      <div className="cms-app min-h-screen flex">
+        <aside className="w-[240px] bg-white text-[#1a1c1e] flex flex-col fixed inset-y-0 left-0 border-r border-[#e3e3e3]">
+          <div className="px-4 py-4 border-b border-[#e3e3e3]">
+            <a href="/" className="block truncate text-[15px] font-semibold text-[#1a1c1e]">{siteName || 'Admin'}</a>
+            <a href="/" className="text-xs text-[#FF5B00] hover:underline">View store</a>
           </div>
-          <nav className="flex-1 p-2">
-            {isStaffManager && (<button type="button" onClick={() => setTab('website')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-medium transition-colors ${tab === 'website' ? 'bg-[#FF5B00] text-white' : 'text-gray-300 hover:bg-white/10'}`}>
-                <Pencil size={18}/> Website
-              </button>)}
-            {features.users !== false && isStaffManager && (<button type="button" onClick={() => setTab('users')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-medium transition-colors ${tab === 'users' ? 'bg-[#FF5B00] text-white' : 'text-gray-300 hover:bg-white/10'}`}>
-                <Users size={18}/> Users
-              </button>)}
-            {features.ecommerce && isStaffManager && (<button type="button" onClick={() => setTab('ecommerce')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-medium transition-colors ${tab === 'ecommerce' ? 'bg-[#FF5B00] text-white' : 'text-gray-300 hover:bg-white/10'}`}>
-                <ShoppingBag size={18}/> Ecommerce
-              </button>)}
-            {features.emailMarketing && isStaffManager && (<button type="button" onClick={() => setTab('email')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-medium transition-colors ${tab === 'email' ? 'bg-[#FF5B00] text-white' : 'text-gray-300 hover:bg-white/10'}`}>
-                <Mail size={18}/> Email marketing
-              </button>)}
-            {features.blog && canBlog && (<button type="button" onClick={() => setTab('blog')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-medium transition-colors ${tab === 'blog' ? 'bg-[#FF5B00] text-white' : 'text-gray-300 hover:bg-white/10'}`}>
-                <Newspaper size={18}/> Blog
-              </button>)}
-            {canBlog && (<button type="button" onClick={() => setTab('media')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-medium transition-colors ${tab === 'media' ? 'bg-[#FF5B00] text-white' : 'text-gray-300 hover:bg-white/10'}`}>
-                <ImageIcon size={18}/> Media
-              </button>)}
-            {isStaffManager && (<button type="button" onClick={() => setTab('general')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-medium transition-colors ${tab === 'general' ? 'bg-[#FF5B00] text-white' : 'text-gray-300 hover:bg-white/10'}`}>
-                <Layers size={18}/> General
-              </button>)}
-            {features.socialSync && isStaffManager && (<button type="button" onClick={() => setTab('social')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-medium transition-colors ${tab === 'social' ? 'bg-[#FF5B00] text-white' : 'text-gray-300 hover:bg-white/10'}`}>
-                <Share2 size={18}/> Social sync
-              </button>)}
-            {features.analytics && isStaffManager && (<button type="button" onClick={() => setTab('analytics')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-medium transition-colors ${tab === 'analytics' ? 'bg-[#FF5B00] text-white' : 'text-gray-300 hover:bg-white/10'}`}>
-                <BarChart3 size={18}/> Analytics
-              </button>)}
-            <div className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-medium text-gray-400 opacity-70">
-              <LayoutDashboard size={18}/> Dashboard (soon)
-            </div>
+          <nav className="flex-1 overflow-y-auto px-2 py-2">
+            {features.ecommerce && isStaffManager && (<>
+              <SideLabel>Shop</SideLabel>
+              {SHOP_MAIN.map((item) => (<SideLink key={item.id} icon={item.icon} label={item.label} active={tab === 'ecommerce' && shopPage === item.id} onClick={() => openShop(item.id)}/>))}
+              {SHOP_EXTRA.filter((item) => modules[item.id]).map((item) => (<SideLink key={item.id} icon={item.icon} label={item.label} active={tab === 'ecommerce' && shopPage === item.id} onClick={() => openShop(item.id)}/>))}
+            </>)}
+            {(isStaffManager || canBlog || (features.blog && canBlog) || (features.emailMarketing && isStaffManager)) ? <SideLabel>Content</SideLabel> : null}
+            {isStaffManager && <SideLink icon={Pencil} label="Website" active={tab === 'website'} onClick={() => setTab('website')}/>}
+            {isStaffManager && <SideLink icon={FileText} label="Pages" active={tab === 'pages'} onClick={() => setTab('pages')}/>}
+            {features.blog && canBlog && <SideLink icon={Newspaper} label="Blog" active={tab === 'blog'} onClick={() => setTab('blog')}/>}
+            {canBlog && <SideLink icon={ImageIcon} label="Media" active={tab === 'media'} onClick={() => setTab('media')}/>}
+            {features.emailMarketing && isStaffManager && <SideLink icon={Mail} label="Email" active={tab === 'email'} onClick={() => setTab('email')}/>}
+            {features.general && isStaffManager && <SideLink icon={Inbox} label="Forms" active={tab === 'forms'} onClick={() => setTab('forms')}/>}
+            {features.analytics && isStaffManager && <SideLink icon={BarChart3} label="Analytics" active={tab === 'analytics'} onClick={() => setTab('analytics')}/>}
           </nav>
-          <div className="p-2 border-t border-white/10 space-y-1">
-            <button type="button" onClick={() => setChangePasswordOpen(true)} className="w-full px-3 py-2 text-left text-sm text-gray-400 hover:text-white">Change my password</button>
-            <button type="button" onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:bg-white/10 hover:text-white">
-              <LogOut size={18}/> Log out
+          <div className="p-2 border-t border-[#e3e3e3]">
+            {isStaffManager && <SideLink icon={Settings} label="Settings" active={tab === 'settings'} onClick={() => { setTab('settings'); setSettingsPage(features.ecommerce ? 'features' : 'staff'); }}/>}
+            <p className="px-2.5 pt-2 text-xs text-[#6d7175] truncate">{actor.name || actor.username}{rank && rank !== 'admin' ? ` · ${rank}` : ''}</p>
+            <button type="button" onClick={() => setChangePasswordOpen(true)} className="w-full px-2.5 py-1.5 text-left text-[13px] text-[#6d7175] hover:text-[#1a1c1e] rounded-lg hover:bg-[#f6f6f7]">Change password</button>
+            <button type="button" onClick={handleLogout} className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[13px] text-[#6d7175] hover:bg-[#f6f6f7] hover:text-[#1a1c1e]">
+              <LogOut size={16}/> Log out
             </button>
           </div>
         </aside>
-        <main className={`flex-1 ml-56 ${tab === 'website' ? 'p-0 overflow-hidden' : 'p-8'}`}>
-          {tab === 'website' && isStaffManager && (<SiteEditorPanel authHeaders={authHeaders} actor={actor} catalogType={catalogType} onOpenTab={setTab}/>)}
+        <main className={`flex-1 ml-[240px] min-w-0 ${tab === 'website' ? 'p-0 overflow-hidden' : 'p-6'}`}>
+          {tab === 'website' && isStaffManager && (<SiteEditorPanel authHeaders={authHeaders} actor={actor} catalogType={catalogType} onOpenTab={setTab} openRoute={editorRoute}/>)}
+          {tab === 'pages' && isStaffManager && (<PagesPanel authHeaders={authHeaders} onOpenPage={(route) => { setEditorRoute(route); setTab('website'); }}/>)}
           {tab === 'analytics' && features.analytics && isStaffManager && (<AnalyticsPanel authHeaders={authHeaders} loading={loading} setLoading={setLoading}/>)}
           {tab === 'blog' && features.blog && canBlog && (<BlogPanel authHeaders={authHeaders} loading={loading} setLoading={setLoading} actor={actor}/>)}
-          {tab === 'general' && isStaffManager && (<GeneralPanel authHeaders={authHeaders} loading={loading} setLoading={setLoading} siteName={siteName}/>)}
           {tab === 'media' && canBlog && <MediaPanel authHeaders={authHeaders} actor={actor}/>}
-          {tab === 'social' && (<div className="max-w-4xl">
-              <h1 className="text-2xl font-bold text-white mb-6">Social sync</h1>
-              <p className="text-gray-400">Reviews and social media sync. Coming soon.</p>
+          {tab === 'forms' && features.general && isStaffManager && (<GeneralPanel authHeaders={authHeaders} loading={loading} setLoading={setLoading} siteName={siteName} start="forms"/>)}
+          {tab === 'ecommerce' && features.ecommerce && isStaffManager && !shopBlocked && (<EcommercePanel catalogType={catalogType} authHeaders={authHeaders} loading={loading} setLoading={setLoading} isOwner={actor.rank === 'admin'} page={shopPage} onPage={openShop}/>)}
+          {tab === 'ecommerce' && shopBlocked && (<div className="max-w-lg rounded-xl bg-white border border-[#e3e3e3] p-6">
+              <h1 className="text-xl font-semibold text-[#1a1c1e] mb-2">This is turned off</h1>
+              <p className="text-sm text-[#6d7175] mb-4">Turn it on under Settings → Features. The tools stay in the product; this client just does not see them until then.</p>
+              <button type="button" onClick={() => { setTab('settings'); setSettingsPage('features'); }} className="px-3 py-2 rounded-lg bg-[#FF5B00] text-white text-sm">Open features</button>
             </div>)}
-          {tab === 'ecommerce' && features.ecommerce && isStaffManager && (<EcommercePanel catalogType={catalogType} authHeaders={authHeaders} loading={loading} setLoading={setLoading} isOwner={actor.rank === 'admin'}/>)}
+          {tab === 'settings' && isStaffManager && (<div className="max-w-6xl flex gap-8 items-start">
+              <nav className="w-44 shrink-0 sticky top-6">
+                {settingsItems.map(([id, label]) => (<button key={id} type="button" onClick={() => setSettingsPage(id)} className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[13px] font-medium ${settingsPage === id ? 'bg-[#f1f2f4] text-[#111]' : 'text-[#4a4a4a] hover:bg-[#f6f6f7]'}`}>{label}</button>))}
+              </nav>
+              <div className="flex-1 min-w-0">
+                {features.ecommerce && ['features', 'store', 'shipping', 'tax', 'checkout', 'bookings', 'test'].includes(settingsPage) && (<ShopSettingsPanel authHeaders={authHeaders} setLoading={setLoading} isOwner={rank === 'admin'} section={settingsPage} onSaved={(next) => next?.modules && setModules({ ...EMPTY_MODULES, ...next.modules })}/>)}
+                {settingsPage === 'payments' && <PaymentsPanel authHeaders={authHeaders} loading={loading} setLoading={setLoading} isOwner={rank === 'admin'}/>}
+                {settingsPage === 'files' && <ShopFilesPanel authHeaders={authHeaders} setLoading={setLoading} isOwner={rank === 'admin'}/>}
+                {settingsPage === 'general' && <GeneralPanel authHeaders={authHeaders} loading={loading} setLoading={setLoading} siteName={siteName}/>}
+                {settingsPage === 'social' && (<div className="max-w-4xl">
+                  <h1 className="text-xl font-semibold text-[#1a1c1e] mb-2">Social sync</h1>
+                  <p className="text-[#6d7175]">Reviews and social media sync. Coming soon.</p>
+                </div>)}
+              </div>
+            </div>)}
           {tab === 'ecommerce' && !features.ecommerce && isStaffManager && (<div className="max-w-4xl">
               <h1 className="text-2xl font-bold text-white mb-4">Products</h1>
               <p className="text-gray-400">Ecommerce is not enabled for this site. Turn it on in the hub, or edit marketing pages under Website.</p>
-              <button type="button" onClick={() => setTab('website')} className="mt-4 px-3 py-2 rounded-lg bg-[#FF5B00] text-white text-sm">Back to Website</button>
-            </div>)}
-          {tab === 'blog' && !features.blog && canBlog && (<div className="max-w-4xl">
-              <h1 className="text-2xl font-bold text-white mb-4">Blog</h1>
-              <p className="text-gray-400">Blog is not enabled for this site.</p>
               <button type="button" onClick={() => setTab('website')} className="mt-4 px-3 py-2 rounded-lg bg-[#FF5B00] text-white text-sm">Back to Website</button>
             </div>)}
           {tab === 'email' && features.emailMarketing && isStaffManager && (<Suspense fallback={<p className="text-gray-400">Laster e-posteditor…</p>}>
@@ -353,7 +413,7 @@ export function ClientCMS() {
               <h1 className="text-2xl font-bold text-white mb-6">Member</h1>
               <p className="text-gray-400">This login has no CMS modules. Ask an admin if you need access.</p>
             </div>)}
-          {tab === 'users' && features.users !== false && isStaffManager && (<div className="max-w-4xl">
+          {tab === 'settings' && settingsPage === 'staff' && features.users !== false && isStaffManager && (<div className="max-w-4xl">
               <h1 className="text-2xl font-bold text-white mb-6">Users</h1>
               <p className="text-gray-400 text-sm mb-6">Staff logins for this site. Passwords are encrypted.{features.general ? ' Ranks: employee (no delete users), writer (blog only), member (no modules).' : ''}</p>
               <div className="rounded-xl bg-[#2a2a2a] border border-white/10 p-6 mb-8">
@@ -426,16 +486,16 @@ export function ClientCMS() {
             </div>)}
         </main>
       </div>
-      {changePasswordOpen && (<div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#2a2a2a] rounded-xl border border-white/10 p-6 max-w-sm w-full">
-            <h2 className="text-lg font-semibold text-white mb-4">Change my password</h2>
+      {changePasswordOpen && (<div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl border border-[#e3e3e3] shadow-lg p-6 max-w-sm w-full">
+            <h2 className="text-lg font-semibold text-[#1a1c1e] mb-4">Change password</h2>
             <form onSubmit={handleChangePassword} className="space-y-4">
-              <input type="password" placeholder="Current password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} className="w-full px-4 py-2 rounded-lg bg-[#1a1a1a] border border-white/20 text-white" required/>
-              <input type="password" placeholder="New password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full px-4 py-2 rounded-lg bg-[#1a1a1a] border border-white/20 text-white" required/>
-              {changePasswordError && <p className="text-red-400 text-sm">{changePasswordError}</p>}
+              <input type="password" placeholder="Current password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} className="w-full px-4 py-2 rounded-lg bg-white border border-[#c9cccf] text-[#1a1c1e]" required/>
+              <input type="password" placeholder="New password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full px-4 py-2 rounded-lg bg-white border border-[#c9cccf] text-[#1a1c1e]" required/>
+              {changePasswordError && <p className="text-[#b42318] text-sm">{changePasswordError}</p>}
               <div className="flex gap-2">
                 <button type="submit" className="px-4 py-2 rounded-lg bg-[#FF5B00] text-white font-medium">Save</button>
-                <button type="button" onClick={() => { setChangePasswordOpen(false); setChangePasswordError(''); setCurrentPassword(''); setNewPassword(''); }} className="px-4 py-2 rounded-lg bg-white/10 text-white">Cancel</button>
+                <button type="button" onClick={() => { setChangePasswordOpen(false); setChangePasswordError(''); setCurrentPassword(''); setNewPassword(''); }} className="px-4 py-2 rounded-lg border border-[#c9cccf] text-[#1a1c1e]">Cancel</button>
               </div>
             </form>
           </div>

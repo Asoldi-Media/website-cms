@@ -573,6 +573,14 @@ export function createStore(dataPath) {
             writeJson(LEADS_PATH, leads);
             return { ok: true, lead, created: true };
         },
+        deleteLead(id) {
+            const leads = this.getAllLeads();
+            const next = leads.filter((row) => row.id !== String(id));
+            if (next.length === leads.length)
+                return { ok: false, error: 'Contact not found' };
+            writeJson(LEADS_PATH, next);
+            return { ok: true };
+        },
         getAllPosts() {
             const now = new Date();
             const rows = readJson(POSTS_PATH, []);

@@ -89,7 +89,7 @@ export function listPublicSiteMedia(publicPath) {
         return [];
     const items = [];
     function walk(dir, rel) {
-        let entries = [];
+        let entries;
         try {
             entries = readdirSync(dir, { withFileTypes: true });
         }

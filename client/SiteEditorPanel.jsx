@@ -112,7 +112,7 @@ function upsertPatch(list, patch) {
     return next;
 }
 /** Visual editor admin tab. */
-export function SiteEditorPanel({ authHeaders, actor, onOpenTab, catalogType = 'normal' }) {
+export function SiteEditorPanel({ authHeaders, actor, onOpenTab, catalogType = 'normal', openRoute = '' }) {
     const iframeRef = useRef(null);
     const [pages, setPages] = useState([]);
     const [route, setRoute] = useState('/');
@@ -157,7 +157,11 @@ export function SiteEditorPanel({ authHeaders, actor, onOpenTab, catalogType = '
             const site = await siteRes.json();
             const list = Array.isArray(site.pages) ? site.pages : [];
             setPages(list);
-            setRoute((current) => (list.some((p) => p.route === current) ? current : list[0]?.route || '/'));
+            setRoute((current) => {
+                if (openRoute && list.some((p) => p.route === openRoute))
+                    return openRoute;
+                return list.some((p) => p.route === current) ? current : list[0]?.route || '/';
+            });
         }
         if (editsRes.ok) {
             const edits = await editsRes.json();
@@ -168,7 +172,7 @@ export function SiteEditorPanel({ authHeaders, actor, onOpenTab, catalogType = '
             setHistoryIndex(0);
             hydratedRef.current = true;
         }
-    }, [authHeaders]);
+    }, [authHeaders, openRoute]);
     useEffect(() => {
         loadState();
     }, [loadState]);

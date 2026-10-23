@@ -14,6 +14,7 @@ export function EmailMarketingPanel({ authHeaders, loading, setLoading }) {
     const [newListName, setNewListName] = useState('');
     const [filters, setFilters] = useState({ email: '', name: '', language: '', marketingAccept: '' });
     const [endpointCopied, setEndpointCopied] = useState(false);
+    const [subscriber, setSubscriber] = useState({ name: '', email: '' });
     const [templates, setTemplates] = useState([]);
     const [mergeFields, setMergeFields] = useState([]);
     const [selectedTemplateId, setSelectedTemplateId] = useState('');
@@ -182,10 +183,11 @@ export function EmailMarketingPanel({ authHeaders, loading, setLoading }) {
         }
     };
     return (<div className="max-w-6xl">
-      <h1 className="text-2xl font-bold text-white mb-2">Email</h1>
+      <h1 className="text-xl font-semibold text-[#1a1c1e] mb-1">Email</h1>
+      <p className="text-sm text-[#6d7175] mb-4">Templates and subscriber lists. Website signup forms feed the lists.</p>
       <div className="flex gap-2 mb-6">
-        <button type="button" onClick={() => setView('templates')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'templates' ? 'bg-[#FF5B00] text-white' : 'bg-white/10 text-gray-300'}`}>Maler</button>
-        <button type="button" onClick={() => setView('lists')} className={`px-3 py-1.5 rounded-lg text-sm ${view === 'lists' ? 'bg-[#FF5B00] text-white' : 'bg-white/10 text-gray-300'}`}>Lister</button>
+        <button type="button" onClick={() => setView('templates')} className={`px-3 py-1.5 rounded-lg text-sm border ${view === 'templates' ? 'bg-[#FF5B00] text-white border-[#FF5B00]' : 'bg-white text-[#1a1c1e] border-[#e3e3e3]'}`}>Templates</button>
+        <button type="button" onClick={() => setView('lists')} className={`px-3 py-1.5 rounded-lg text-sm border ${view === 'lists' ? 'bg-[#FF5B00] text-white border-[#FF5B00]' : 'bg-white text-[#1a1c1e] border-[#e3e3e3]'}`}>Lists</button>
       </div>
 
       {view === 'templates' && (<div className="grid md:grid-cols-[240px_1fr] gap-6">
@@ -284,6 +286,34 @@ export function EmailMarketingPanel({ authHeaders, loading, setLoading }) {
                   No website form is wired to this list yet. Forms are connected in Website Creator → Step 3 “CMS hookup” before publishing.
                 </p>)}
             </div>)}
+          <form className="flex flex-wrap gap-2 mb-4" onSubmit={async (e) => {
+            e.preventDefault();
+            if (!subscriber.email.trim() || !selected)
+                return;
+            setLoading(true);
+            try {
+                const res = await fetch(`${API}/leads`, {
+                    method: 'POST',
+                    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ listId: selected.id, name: subscriber.name, email: subscriber.email, marketingAccept: true }),
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    alert(data.message || 'Could not add subscriber');
+                    return;
+                }
+                setSubscriber({ name: '', email: '' });
+                await fetchLeads();
+                await fetchLists();
+            }
+            finally {
+                setLoading(false);
+            }
+        }}>
+            <input value={subscriber.name} onChange={(e) => setSubscriber((s) => ({ ...s, name: e.target.value }))} placeholder="Name" className="px-3 py-2 rounded-lg bg-white border border-[#c9cccf] text-sm text-[#1a1c1e]"/>
+            <input value={subscriber.email} onChange={(e) => setSubscriber((s) => ({ ...s, email: e.target.value }))} placeholder="Email" type="email" required className="px-3 py-2 rounded-lg bg-white border border-[#c9cccf] text-sm text-[#1a1c1e]"/>
+            <button type="submit" disabled={loading || !selected} className="px-3 py-2 rounded-lg bg-[#FF5B00] text-white text-sm disabled:opacity-50">Add subscriber</button>
+          </form>
           <div className="grid md:grid-cols-4 gap-2 mb-4">
             <input placeholder="Name" value={filters.name} onChange={(e) => setFilters((f) => ({ ...f, name: e.target.value }))} className="px-3 py-2 rounded-lg bg-[#1a1a1a] border border-white/20 text-white text-sm"/>
             <input placeholder="Email" value={filters.email} onChange={(e) => setFilters((f) => ({ ...f, email: e.target.value }))} className="px-3 py-2 rounded-lg bg-[#1a1a1a] border border-white/20 text-white text-sm"/>
@@ -306,6 +336,7 @@ export function EmailMarketingPanel({ authHeaders, loading, setLoading }) {
                   <th className="px-3 py-2">Signup</th>
                   <th className="px-3 py-2">Accept</th>
                   <th className="px-3 py-2">Accept time</th>
+                  <th className="px-3 py-2"></th>
                 </tr>
               </thead>
               <tbody>
@@ -318,11 +349,26 @@ export function EmailMarketingPanel({ authHeaders, loading, setLoading }) {
                     <td className="px-3 py-2 text-gray-400">{lead.signupAt ? new Date(lead.signupAt).toLocaleString() : '—'}</td>
                     <td className="px-3 py-2 text-gray-300">{acceptLabel(lead.marketingAccept)}</td>
                     <td className="px-3 py-2 text-gray-400">{lead.marketingAcceptAt ? new Date(lead.marketingAcceptAt).toLocaleString() : ''}</td>
+                    <td className="px-3 py-2"><button type="button" className="text-xs text-red-600" onClick={async () => {
+                      if (!confirm(`Remove ${lead.email}?`))
+                          return;
+                      await fetch(`${API}/leads/${lead.id}`, { method: 'DELETE', headers: authHeaders() });
+                      await fetchLeads();
+                      await fetchLists();
+                    }}>Remove</button></td>
                   </tr>))}
               </tbody>
             </table>
             {leads.length === 0 && <p className="px-4 py-8 text-gray-400 text-center">No contacts in this list yet.</p>}
           </div>
+          <button type="button" className="mt-3 px-3 py-2 rounded-lg border border-[#e3e3e3] bg-white text-sm text-[#1a1c1e]" onClick={() => {
+            const header = ['name', 'email', 'sms', 'whatsapp', 'language', 'signupAt', 'marketingAccept'];
+            const lines = [header.join(',')].concat(leads.map((lead) => header.map((key) => `"${String(lead[key] ?? '').replace(/"/g, '""')}"`).join(',')));
+            const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            Object.assign(document.createElement('a'), { href: url, download: `${selected?.slug || 'subscribers'}.csv` }).click();
+            URL.revokeObjectURL(url);
+        }}>Export subscribers</button>
         </div>
       </div>
       </>)}

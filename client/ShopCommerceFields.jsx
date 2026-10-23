@@ -68,6 +68,8 @@ export function CommerceFields({ value, onChange, authHeaders }) {
   const setIn = (key, patch) => onChange({ ...c, [key]: { ...c[key], ...patch } });
   const classes = settings?.tax?.classes || [];
   const staff = settings?.bookings?.staff || [];
+  const mods = settings?.modules || {};
+  const kinds = KINDS.filter(([id]) => (id === 'booking' ? mods.bookings : id === 'subscription' ? mods.subscriptions : id === 'giftcard' ? mods.giftcards : true));
 
   const buildVariants = () => {
     const options = optionsText
@@ -90,7 +92,7 @@ export function CommerceFields({ value, onChange, authHeaders }) {
       <div className="grid md:grid-cols-3 gap-3">
         <Field label="Type">
           <select className={inputClass} value={c.kind} onChange={(e) => set({ kind: e.target.value, requiresShipping: e.target.value === 'physical' })}>
-            {KINDS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            {kinds.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
           </select>
         </Field>
         <Field label="MVA-klasse">
@@ -114,7 +116,7 @@ export function CommerceFields({ value, onChange, authHeaders }) {
         <Field label="Maks per ordre"><input type="number" min="1" className={inputClass} value={c.maxPerOrder} onChange={(e) => set({ maxPerOrder: e.target.value })} /></Field>
         <div className="flex flex-col gap-2 justify-end">
           <Check label="Kan bestilles når tomt (restordre)" checked={c.backorders === 'yes'} onChange={(v) => set({ backorders: v ? 'yes' : 'no' })} />
-          <Check label="Tillat omtaler" checked={c.reviewsEnabled} onChange={(v) => set({ reviewsEnabled: v })} />
+          {mods.reviews && <Check label="Tillat omtaler" checked={c.reviewsEnabled} onChange={(v) => set({ reviewsEnabled: v })} />}
         </div>
       </div>
 

@@ -100,6 +100,19 @@ function normalizeHours(raw) {
 
 const DEFAULT_HOURS = { mon: [['09:00', '17:00']], tue: [['09:00', '17:00']], wed: [['09:00', '17:00']], thu: [['09:00', '17:00']], fri: [['09:00', '17:00']], sat: [], sun: [] };
 
+export const SHOP_MODULES = Object.freeze(['bookings', 'discounts', 'giftcards', 'subscriptions', 'reviews', 'abandoned']);
+
+/** Shop modules: a module this site never set is on; only an explicit false (or 0) turns it off. */
+export function normalizeModules(raw) {
+  const input = raw && typeof raw === 'object' ? raw : {};
+  const out = {};
+  for (const key of SHOP_MODULES) {
+    const value = input[key];
+    out[key] = value === undefined || value === null ? true : Boolean(value);
+  }
+  return out;
+}
+
 /** Shop settings with defaults filled in and values clamped. */
 export function normalizeShopSettings(raw = {}) {
   const input = raw && typeof raw === 'object' ? raw : {};
@@ -172,6 +185,7 @@ export function normalizeShopSettings(raw = {}) {
     giftcards: {
       validityMonths: num(giftcards.validityMonths, 36, { min: 1, max: 120 }),
     },
+    modules: normalizeModules(input.modules),
   };
 }
 

@@ -158,7 +158,6 @@ export function ProductFields({ form, setForm, categories, loading, imageUploadi
         </select>)}
       {field(type === 'tiers' ? 'Plan name' : 'Name', <input type="text" value={form.name} onChange={(e) => setForm((current) => ({ ...current, name: e.target.value }))} className={inputClass}/>)}
       {field('Price', <input type="text" value={form.price} disabled={form.contactInsteadOfPrice} onChange={(e) => setForm((current) => ({ ...current, price: e.target.value }))} placeholder={type === 'tiers' ? 'e.g. 1499,-/mnd' : 'e.g. 109,-'} className={inputClass}/>)}
-      {field('Compare-at price', <input type="text" value={form.comparePrice} onChange={(e) => setForm((current) => ({ ...current, comparePrice: e.target.value }))} placeholder="Optional" className={inputClass}/>)}
       <label className="flex items-center gap-2 text-sm text-gray-300 md:col-span-2">
         <input type="checkbox" checked={form.contactInsteadOfPrice} onChange={(e) => setForm((current) => ({ ...current, contactInsteadOfPrice: e.target.checked }))}/>
         No price — show contact instead
@@ -180,8 +179,6 @@ export function ProductFields({ form, setForm, categories, loading, imageUploadi
             field('Included (one per line)', <textarea value={form.includedText} onChange={(e) => setForm((current) => ({ ...current, includedText: e.target.value }))} rows={4} className={inputClass}/>)}
       {type === 'tiers' &&
             field('CTA', <input type="text" value={form.cta} onChange={(e) => setForm((current) => ({ ...current, cta: e.target.value }))} placeholder="e.g. Contact us" className={inputClass}/>)}
-      {field('Extra notes (one per line)', <textarea value={form.extraTexts} onChange={(e) => setForm((current) => ({ ...current, extraTexts: e.target.value }))} rows={2} placeholder="Inkluderer 2 års garanti" className={inputClass}/>)}
-      {field('Add-ons (name | price per line)', <textarea value={form.extraOptionsText} onChange={(e) => setForm((current) => ({ ...current, extraOptionsText: e.target.value }))} rows={2} placeholder={'Ekstra ost | 15'} className={inputClass}/>)}
       {field('In stock', <input type="number" min="0" value={form.stockQty} disabled={form.soldOut} onChange={(e) => setForm((current) => ({ ...current, stockQty: e.target.value }))} className={inputClass}/>)}
       <label className="flex items-center gap-2 text-sm text-white md:col-span-2">
         <input type="checkbox" checked={form.soldOut} onChange={(e) => setForm((current) => ({
@@ -194,6 +191,14 @@ export function ProductFields({ form, setForm, categories, loading, imageUploadi
       <div className="md:col-span-2">
         <ImageDropzone imageUrl={form.imageUrl} uploading={imageUploading} disabled={loading} onUpload={onUpload} onClear={() => setForm((current) => ({ ...current, imageUrl: '' }))} authHeaders={authHeaders} onPickUrl={(url) => setForm((current) => ({ ...current, imageUrl: url }))}/>
       </div>
-      {!compact && authHeaders && form.commerce && (<CommerceFields value={form.commerce} onChange={(commerce) => setForm((current) => ({ ...current, commerce }))} authHeaders={authHeaders}/>)}
+      <details className="md:col-span-2 rounded-lg border border-[#e3e3e3] bg-white p-3">
+        <summary className="cursor-pointer text-sm font-medium text-[#1a1c1e]">Advanced</summary>
+        <div className="grid md:grid-cols-2 gap-4 mt-3">
+          {field('Compare-at price', <input type="text" value={form.comparePrice} onChange={(e) => setForm((current) => ({ ...current, comparePrice: e.target.value }))} placeholder="Optional" className={inputClass}/>)}
+          {field('Extra notes (one per line)', <textarea value={form.extraTexts} onChange={(e) => setForm((current) => ({ ...current, extraTexts: e.target.value }))} rows={2} placeholder="Inkluderer 2 års garanti" className={inputClass}/>)}
+          {field('Add-ons (name | price per line)', <textarea value={form.extraOptionsText} onChange={(e) => setForm((current) => ({ ...current, extraOptionsText: e.target.value }))} rows={2} placeholder={'Ekstra ost | 15'} className={inputClass}/>)}
+          {!compact && authHeaders && form.commerce && (<CommerceFields value={form.commerce} onChange={(commerce) => setForm((current) => ({ ...current, commerce }))} authHeaders={authHeaders}/>)}
+        </div>
+      </details>
     </div>);
 }

@@ -6,6 +6,7 @@ import { isPublicAnalyticsEnabled } from './analytics-flag.js';
 import { injectSiteRuntimes } from './site-hydrator.js';
 import { loadSiteSeed } from './site-seed.js';
 import { contentKindFromPath, templateRouteForKind } from './content-pages.js';
+import { fallbackHtmlForKind } from './cms-templates.js';
 /** HTML file in the public dir for a URL path, or null. */
 export function resolvePublicHtml(publicPath, urlPath) {
     let decoded = String(urlPath || '/').split('?')[0];
@@ -44,6 +45,37 @@ export function preparePublicHtml(html, { editor = false, analytics = false } = 
         injectAnalytics: injectAnalyticsTracker,
     });
 }
+const CONTENT_KINDS = [
+    ['blog-index', '/blog'],
+    ['blog-post', '/blog/:slug'],
+    ['product-index', '/products'],
+    ['product-page', '/products/:id'],
+];
+
+/** Where /blog and /products render from: the client page, or the CMS template. */
+export function contentCoverage(seed, publicPath) {
+    return CONTENT_KINDS.map(([kind, path]) => {
+        const route = templateRouteForKind(seed, kind);
+        const file = route ? resolvePublicHtml(publicPath, route) : null;
+        return { kind, path, route: route || '', source: file ? 'client' : 'cms' };
+    });
+}
+
+/** HTML for a public URL: the file, the client template page, or the CMS fallback. */
+export function resolveServedHtml(publicPath, urlPath, seed) {
+    const direct = resolvePublicHtml(publicPath, urlPath);
+    if (direct)
+        return readFileSync(direct, 'utf8');
+    const kind = contentKindFromPath(urlPath);
+    if (!kind)
+        return '';
+    const route = templateRouteForKind(seed, kind);
+    const client = route ? resolvePublicHtml(publicPath, route) : null;
+    if (client)
+        return readFileSync(client, 'utf8');
+    return fallbackHtmlForKind(kind);
+}
+
 /** Serve public HTML through the CMS script injector. */
 export function mountPublicHtmlTracker(app, publicPath, { siteSeed, siteSeedPath } = {}) {
     if (!publicPath)
@@ -54,18 +86,12 @@ export function mountPublicHtmlTracker(app, publicPath, { siteSeed, siteSeedPath
             return next();
         if (req.path.startsWith('/admin') || req.path.startsWith('/api'))
             return next();
-        let file = resolvePublicHtml(publicPath, req.path);
-        if (!file) {
-            const kind = contentKindFromPath(req.path);
-            const route = kind ? templateRouteForKind(seed(), kind) : '';
-            if (route)
-                file = resolvePublicHtml(publicPath, route);
-        }
-        if (!file)
+        const raw = resolveServedHtml(publicPath, req.path, seed());
+        if (!raw)
             return next();
         try {
             const editor = isSiteEditorRequest(req);
-            const html = preparePublicHtml(readFileSync(file, 'utf8'), {
+            const html = preparePublicHtml(raw, {
                 editor,
                 analytics: !editor && isPublicAnalyticsEnabled(),
             });

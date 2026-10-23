@@ -44,6 +44,21 @@ function providerSum(r) {
   return r.providerLines.reduce((s, l) => s + l.unitAmount * l.quantity, 0) + (r.providerShipping?.amountMinor || 0);
 }
 
+test('shop modules a site never set stay on; an explicit false stays off', () => {
+  const blank = normalizeShopSettings({});
+  assert.deepEqual(blank.modules, { bookings: true, discounts: true, giftcards: true, subscriptions: true, reviews: true, abandoned: true });
+  const partial = normalizeShopSettings({ modules: { bookings: true, discounts: 1, giftcards: false, reviews: 0, abandoned: null } });
+  assert.equal(partial.modules.bookings, true);
+  assert.equal(partial.modules.discounts, true);
+  assert.equal(partial.modules.giftcards, false);
+  assert.equal(partial.modules.reviews, false);
+  assert.equal(partial.modules.subscriptions, true, 'absent key stays on');
+  assert.equal(partial.modules.abandoned, true, 'null counts as never set');
+  const off = normalizeShopSettings({ modules: { bookings: false, discounts: false, giftcards: false, subscriptions: false, reviews: false, abandoned: false } });
+  assert.deepEqual(Object.values(off.modules), [false, false, false, false, false, false]);
+  assert.deepEqual(normalizeShopSettings(off).modules, off.modules, 'saved settings round-trip unchanged');
+});
+
 test('money helpers', () => {
   assert.equal(parseMajor('1 299,50'), 1299.5);
   assert.equal(parseMajor('kr 99,-'), 99);

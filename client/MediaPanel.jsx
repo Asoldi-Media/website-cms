@@ -258,7 +258,7 @@ export function MediaPanel({ authHeaders, actor }) {
     return (<div className="max-w-6xl">
       <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-white">Media</h1>
+          <h1 className="text-xl font-semibold text-[#1a1c1e]">Media</h1>
           <p className="text-gray-400 text-sm mt-1">
             All uploaded files for this site, stored on the server — {lib.items.length} files · {formatBytes(total)}. Reuse them in products, blog posts and pages.
           </p>
@@ -278,7 +278,7 @@ export function MediaPanel({ authHeaders, actor }) {
         {FILTERS.map(([key, label]) => (<button key={key} type="button" onClick={() => setFilter(key)} className={`px-3 py-1 rounded-full text-xs ${filter === key ? 'bg-[#FF5B00] text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'}`}>
             {label}
           </button>))}
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" className="ml-auto rounded bg-[#1a1a1a] border border-white/10 px-3 py-1.5 text-sm text-white w-56"/>
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" className="ml-auto rounded-lg bg-white border border-[#c9cccf] px-3 py-1.5 text-sm text-[#1a1c1e] w-56"/>
       </div>
 
       <div className={`grid gap-6 ${selectedItem ? 'lg:grid-cols-[1fr_320px]' : ''}`}>
@@ -311,7 +311,7 @@ export function MediaPicker({ authHeaders, open, onClose, onPick, kind = 'image'
     const visible = lib.items.filter((item) => (!kind || kind === 'all' || item.kind === kind) && (!q || item.name.toLowerCase().includes(q)));
     const accept = kind === 'image' ? 'image/*' : kind === 'video' ? 'video/*' : kind === 'audio' ? 'audio/*' : undefined;
     return (<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
-      <div className="w-full max-w-4xl max-h-[85vh] flex flex-col rounded-2xl bg-[#232323] border border-white/10 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-4xl max-h-[85vh] flex flex-col rounded-2xl bg-white border border-[#e3e3e3] shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
           <h2 className="text-white font-semibold">{title}</h2>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-white">

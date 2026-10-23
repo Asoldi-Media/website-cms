@@ -7,9 +7,9 @@ const PROVIDER_LABEL = { stripe: 'Kort (Stripe)', paypal: 'PayPal', giftcard: 'G
 
 function Stat({ label, value, tone = '' }) {
   return (
-    <div className="rounded-xl bg-[#2a2a2a] border border-white/10 p-4">
-      <div className="text-xs text-gray-400">{label}</div>
-      <div className={`text-2xl font-semibold ${tone || 'text-white'}`}>{value}</div>
+    <div className="rounded-xl bg-white border border-[#e3e3e3] shadow-sm p-4 hover:border-[#c9cccf]">
+      <div className="text-xs text-[#6d7175]">{label}</div>
+      <div className={`text-2xl font-semibold ${tone || 'text-[#1a1c1e]'}`}>{value}</div>
     </div>
   );
 }
@@ -35,8 +35,8 @@ export function ShopOverviewPanel({ authHeaders, onOpen }) {
       <ErrorLine error={overviewError} />
       {overview && (
         <div className="grid sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-          <button type="button" className="text-left" onClick={() => onOpen('orders')}><Stat label="Skal sendes" value={overview.toFulfil} tone={overview.toFulfil ? 'text-yellow-200' : ''} /></button>
-          <button type="button" className="text-left" onClick={() => onOpen('products')}><Stat label="Lite på lager" value={overview.lowStock.length} tone={overview.lowStock.length ? 'text-red-300' : ''} /></button>
+          <button type="button" className="text-left" onClick={() => onOpen('orders')}><Stat label="Skal sendes" value={overview.toFulfil} tone={overview.toFulfil ? 'text-[#8a6116]' : ''} /></button>
+          <button type="button" className="text-left" onClick={() => onOpen('products')}><Stat label="Lite på lager" value={overview.lowStock.length} tone={overview.lowStock.length ? 'text-[#b42318]' : ''} /></button>
           <button type="button" className="text-left" onClick={() => onOpen('bookings')}><Stat label="Timer neste 7 dager" value={overview.upcomingBookings} /></button>
           <button type="button" className="text-left" onClick={() => onOpen('reviews')}><Stat label="Omtaler til godkjenning" value={overview.pendingReviews} /></button>
           <button type="button" className="text-left" onClick={() => onOpen('subscriptions')}><Stat label="Aktive abonnement" value={overview.activeSubscriptions} /></button>

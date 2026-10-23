@@ -36,7 +36,8 @@ import { siteHydratorScript } from './site-hydrator.js';
 import { siteEditorRuntimeScript } from './site-editor-runtime.js';
 import { contentRuntimeScript } from './content-runtime.js';
 import { extractSlotMapFromHtml } from './slot-map.js';
-import { resolvePublicHtml } from './html-tracker.js';
+import { contentCoverage, resolvePublicHtml } from './html-tracker.js';
+import { cmsCapabilities } from './capabilities.js';
 import { applyFieldMap, errorMessageFor, formsRuntimeScript, looksLikeBot, publicSubmission, safeReturnPath, successMessageFor, wantsJson, } from './forms.js';
 export { resolveCmsDataPath } from './data-path.js';
 export { loadSiteSeed, normalizeSiteSeed } from './site-seed.js';
@@ -714,6 +715,14 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
         }
         res.status(result.created ? 201 : 200).json({ ok: true, id: result.lead.id, listId: list.id, listSlug: list.slug });
     });
+    router.delete('/leads/:id', adminAuth, (req, res) => {
+        const result = store.deleteLead(req.params.id);
+        if (!result.ok) {
+            res.status(404).json({ message: result.error });
+            return;
+        }
+        res.json({ ok: true });
+    });
     router.get('/lists', adminAuth, (_req, res) => {
         store.ensureDefaultList();
         const lists = store.getAllLists().map((list) => ({
@@ -732,6 +741,15 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
     });
     router.get('/pages', adminAuth, (_req, res) => {
         res.json(siteSeed.pages);
+    });
+    router.get('/content-pages', adminAuth, (_req, res) => {
+        res.json({
+            pages: siteSeed.pages,
+            content: contentCoverage(siteSeed, resolvedPublicPath),
+        });
+    });
+    router.get('/capabilities', adminAuth, (_req, res) => {
+        res.json(cmsCapabilities());
     });
     router.get('/forms', adminAuth, (_req, res) => {
         res.json(publicSiteSeed().forms);

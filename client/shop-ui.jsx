@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 export const API = '/api/cms';
-export const inputClass = 'w-full px-3 py-2 rounded-lg bg-[#1a1a1a] border border-white/20 text-white text-sm placeholder-gray-500';
+export const inputClass = 'w-full px-3 py-2 rounded-lg bg-white border border-[#c9cccf] text-[#1a1c1e] text-sm placeholder:text-[#8c9196] focus:outline-none focus:border-[#FF5B00] focus:ring-2 focus:ring-[#FF5B00]/20';
 
 /** fetch wrapper: JSON in/out, throws Error(message) on non-2xx. */
 export function useShopApi(authHeaders) {
@@ -69,10 +69,10 @@ export function when(value, withTime = true) {
 /** Panel card with a title and optional actions. */
 export function Card({ title, actions, children, className = '' }) {
   return (
-    <div className={`rounded-xl bg-[#2a2a2a] border border-white/10 p-5 mb-4 ${className}`}>
+    <div className={`rounded-xl bg-white border border-[#e3e3e3] shadow-sm p-5 mb-4 ${className}`}>
       {(title || actions) && (
         <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-          {title && <h3 className="text-white font-semibold">{title}</h3>}
+          {title && <h3 className="text-[#1a1c1e] font-semibold">{title}</h3>}
           {actions}
         </div>
       )}
@@ -85,8 +85,8 @@ export function Card({ title, actions, children, className = '' }) {
 export function Btn({ kind = 'primary', className = '', ...props }) {
   const look = {
     primary: 'bg-[#FF5B00] text-white hover:bg-[#e55200]',
-    ghost: 'bg-white/10 text-white hover:bg-white/20',
-    danger: 'bg-red-600/80 text-white hover:bg-red-600',
+    ghost: 'bg-white text-[#1a1c1e] border border-[#c9cccf] hover:bg-[#f6f6f7]',
+    danger: 'bg-white text-[#b42318] border border-[#f3c1bc] hover:bg-[#fff5f4]',
   }[kind];
   return <button type="button" {...props} className={`px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50 ${look} ${className}`} />;
 }
@@ -95,7 +95,7 @@ export function Btn({ kind = 'primary', className = '', ...props }) {
 export function Field({ label, hint, children, className = '' }) {
   return (
     <label className={`block ${className}`}>
-      <span className="block text-xs text-gray-400 mb-1">{label}</span>
+      <span className="block text-xs font-medium text-[#6d7175] mb-1">{label}</span>
       {children}
       {hint && <span className="block text-xs text-gray-500 mt-1">{hint}</span>}
     </label>
@@ -105,7 +105,7 @@ export function Field({ label, hint, children, className = '' }) {
 /** Checkbox with a label. */
 export function Check({ label, checked, onChange, disabled }) {
   return (
-    <label className="flex items-center gap-2 text-sm text-gray-200">
+    <label className="flex items-center gap-2 text-sm text-[#1a1c1e]">
       <input type="checkbox" checked={Boolean(checked)} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       {label}
     </label>
@@ -115,11 +115,11 @@ export function Check({ label, checked, onChange, disabled }) {
 /** Small status pill. */
 export function Badge({ tone = 'gray', children }) {
   const look = {
-    gray: 'bg-white/10 text-gray-300',
-    green: 'bg-green-500/20 text-green-300',
-    yellow: 'bg-yellow-500/20 text-yellow-200',
-    red: 'bg-red-500/20 text-red-300',
-    blue: 'bg-blue-500/20 text-blue-200',
+    gray: 'bg-[#f1f2f4] text-[#4a4a4a]',
+    green: 'bg-[#e7f6ee] text-[#0b7a43]',
+    yellow: 'bg-[#fff6e0] text-[#8a6116]',
+    red: 'bg-[#fff0ee] text-[#b42318]',
+    blue: 'bg-[#eef4ff] text-[#1f5196]',
   }[tone];
   return <span className={`inline-block px-2 py-0.5 rounded text-xs ${look}`}>{children}</span>;
 }
@@ -131,7 +131,7 @@ export function ErrorLine({ error }) {
 
 /** Notice shown to staff that only the owner can change this. */
 export function OwnerNote({ isOwner }) {
-  return isOwner ? null : <p className="text-yellow-200/80 text-xs mb-3">Bare eier (admin) kan endre dette. Du kan se, men ikke lagre.</p>;
+  return isOwner ? null : <p className="text-[#8a6116] text-xs mb-3">Bare eier (admin) kan endre dette. Du kan se, men ikke lagre.</p>;
 }
 
 /** Runs an action with loading + alert on failure; returns the result or null. */

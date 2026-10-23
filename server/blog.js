@@ -44,6 +44,8 @@ export function normalizePost(raw) {
         publishedAt,
         authorId: String(raw.authorId || ''),
         authorName: String(raw.authorName || '').trim(),
+        excerpt: String(raw.excerpt || '').trim().slice(0, 300),
+        featuredImage: String(raw.featuredImage || '').trim(),
         blocks: (Array.isArray(raw.blocks) ? raw.blocks : []).map(normalizeBlock).filter(Boolean),
         createdAt,
         updatedAt: raw.updatedAt || createdAt,
@@ -84,6 +86,8 @@ export function publicPost(post) {
         status: post.status,
         publishedAt: post.publishedAt,
         authorName: post.authorName,
+        excerpt: post.excerpt,
+        featuredImage: post.featuredImage,
         blocks: post.blocks,
     };
 }

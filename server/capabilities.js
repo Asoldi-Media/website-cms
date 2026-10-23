@@ -115,6 +115,18 @@ export const LISTING_SLOTS = Object.freeze([
     'listing.item.author',
 ]);
 export const ALL_CMS_SLOTS = Object.freeze([...PRODUCT_SLOTS, ...POST_SLOTS, ...LISTING_SLOTS]);
+export const ADMIN_CONTENT_ENDPOINTS = Object.freeze([
+    { id: 'posts.admin.list', method: 'GET', path: '/api/cms/admin/posts' },
+    { id: 'posts.admin.create', method: 'POST', path: '/api/cms/admin/posts' },
+    { id: 'posts.admin.update', method: 'PUT', path: '/api/cms/admin/posts/:id' },
+    { id: 'posts.admin.delete', method: 'DELETE', path: '/api/cms/admin/posts/:id' },
+    { id: 'pages.list', method: 'GET', path: '/api/cms/pages' },
+    { id: 'content.pages', method: 'GET', path: '/api/cms/content-pages' },
+    { id: 'site.edits', method: 'GET', path: '/api/cms/site-edits' },
+    { id: 'site.edits.draft', method: 'PUT', path: '/api/cms/site-edits/draft' },
+    { id: 'site.edits.publish', method: 'POST', path: '/api/cms/site-edits/publish' },
+    { id: 'analytics.overview', method: 'GET', path: '/api/cms/analytics/overview' },
+]);
 export const PUBLIC_SITE_ENDPOINTS = Object.freeze([
     { id: 'forms.submit', method: 'POST', path: '/api/cms/forms/:id/submit' },
     { id: 'forms.runtime', method: 'GET', path: '/api/cms/forms-runtime.js' },
@@ -153,6 +165,7 @@ export function cmsCapabilities() {
         injectOrder: [...PUBLIC_SCRIPT_INJECT_ORDER],
         content: { ...CONTENT_SEED_CONTRACT },
         publicEndpoints: PUBLIC_SITE_ENDPOINTS.map((row) => ({ ...row })),
+        adminEndpoints: ADMIN_CONTENT_ENDPOINTS.map((row) => ({ ...row })),
     };
 }
 /** Closed-vocabulary block for the Step 3 binding model. Do not invent endpoints. */

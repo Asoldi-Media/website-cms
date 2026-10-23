@@ -20,8 +20,17 @@ function HoursEditor({ hours, onChange }) {
   );
 }
 
-/** Seller details, MVA, shipping zones, checkout and booking settings. */
-export function ShopSettingsPanel({ authHeaders, setLoading, isOwner }) {
+const MODULES = [
+  ['bookings', 'Timebestilling', 'Kalender, ansatte og timer i kassen.'],
+  ['discounts', 'Rabatter', 'Kuponger og automatiske rabatter.'],
+  ['giftcards', 'Gavekort', 'Salg og innløsing av gavekort.'],
+  ['subscriptions', 'Abonnement', 'Faste trekk med Stripe.'],
+  ['reviews', 'Omtaler', 'Kunder skriver, du godkjenner.'],
+  ['abandoned', 'Forlatte kasser', 'Én e-postpåminnelse når kunden har sagt ja.'],
+];
+
+/** Seller details, MVA, shipping zones, checkout and booking settings. `section` shows one settings page. */
+export function ShopSettingsPanel({ authHeaders, setLoading, isOwner, section = 'all', onSaved }) {
   const api = useShopApi(authHeaders);
   const act = useAction(setLoading);
   const [saved, reload, error] = useLoad(api, '/shop/admin/settings', null);
@@ -32,9 +41,12 @@ export function ShopSettingsPanel({ authHeaders, setLoading, isOwner }) {
   if (!s) return <ErrorLine error={error} />;
 
   const sec = (key, patch) => setS((x) => ({ ...x, [key]: { ...x[key], ...patch } }));
+  const show = (name) => section === 'all' || section === name;
   const save = (...keys) => act(async () => {
     const body = Object.fromEntries(keys.map((k) => [k, s[k]]));
-    setS(structuredClone(await api('PUT', '/shop/admin/settings', body)));
+    const next = await api('PUT', '/shop/admin/settings', body);
+    setS(structuredClone(next));
+    onSaved?.(next);
     await reload();
   });
   const zones = s.shipping.zones;
@@ -45,7 +57,21 @@ export function ShopSettingsPanel({ authHeaders, setLoading, isOwner }) {
   return (
     <div>
       <OwnerNote isOwner={isOwner} />
-      <Card title="Selger (står på kvitteringer)">
+      {show('features') && (
+        <Card title="Funksjoner for denne kunden">
+          <p className="text-sm text-[#6d7175] mb-3">Alt finnes. Av er borte fra menyen til du skrur det på her. Nettsted, ordrer, produkter og kunder er alltid på.</p>
+          <div className="grid sm:grid-cols-2 gap-3">
+            {MODULES.map(([key, label, hint]) => (
+              <div key={key} className="rounded-lg border border-[#e3e3e3] p-3">
+                <Check label={label} checked={s.modules?.[key]} onChange={(v) => sec('modules', { [key]: v })} />
+                <p className="text-xs text-[#6d7175] mt-1 ml-6">{hint}</p>
+              </div>
+            ))}
+          </div>
+          <SaveBtn keys={['modules']} />
+        </Card>
+      )}
+      {show('store') && <Card title="Selger (står på kvitteringer)">
         <div className="grid md:grid-cols-3 gap-3">
           <Field label="Juridisk navn"><input className={inputClass} value={s.seller.legalName} onChange={(e) => sec('seller', { legalName: e.target.value })} /></Field>
           <Field label="Org.nr."><input className={inputClass} value={s.seller.orgNumber} onChange={(e) => sec('seller', { orgNumber: e.target.value })} /></Field>
@@ -60,9 +86,9 @@ export function ShopSettingsPanel({ authHeaders, setLoading, isOwner }) {
           <Check label="Registrert i Foretaksregisteret (AS m.fl.)" checked={s.seller.foretaksregisteret} onChange={(v) => sec('seller', { foretaksregisteret: v })} />
         </div>
         <SaveBtn keys={['seller']} />
-      </Card>
+      </Card>}
 
-      <Card title="MVA">
+      {show('tax') && <Card title="MVA">
         <div className="flex flex-wrap gap-4 mb-3">
           <Check label="Prisene jeg skriver inn er inkl. MVA" checked={s.tax.pricesIncludeTax} onChange={(v) => sec('tax', { pricesIncludeTax: v })} />
           <Check label="Nullsats ved salg til utlandet (eksport)" checked={s.tax.exportZeroRated} onChange={(v) => sec('tax', { exportZeroRated: v })} />
@@ -87,9 +113,9 @@ export function ShopSettingsPanel({ authHeaders, setLoading, isOwner }) {
         <Btn kind="ghost" className="text-xs" onClick={() => sec('tax', { rates: [...s.tax.rates, { country: s.country, taxClass: 'standard', rate: 25 }] })}>Legg til sats</Btn>
         <p className="text-xs text-gray-500 mt-2">Hvert produkt har en MVA-klasse (standard 25 %, mat 15 %, redusert 12 %, fritatt 0 %). Frakt får samme sats som varene.</p>
         <SaveBtn keys={['tax']} />
-      </Card>
+      </Card>}
 
-      <Card title="Frakt">
+      {show('shipping') && <Card title="Frakt">
         {zones.map((z, zi) => (
           <div key={z.id || zi} className="rounded-lg border border-white/10 p-4 mb-3">
             <div className="grid md:grid-cols-3 gap-3 mb-3">
@@ -133,9 +159,9 @@ export function ShopSettingsPanel({ authHeaders, setLoading, isOwner }) {
         ))}
         <Btn kind="ghost" className="text-xs" onClick={() => sec('shipping', { zones: [...zones, { name: 'Ny sone', countries: [], methods: [] }] })}>Legg til sone</Btn>
         <SaveBtn keys={['shipping']} />
-      </Card>
+      </Card>}
 
-      <Card title="Kasse og ordrer">
+      {show('checkout') && <Card title="Kasse og ordrer">
         <div className="grid md:grid-cols-3 gap-3">
           <Field label="Tekst på kjøpsknappen" hint="Må gjøre det klart at kunden forplikter seg til å betale."><input className={inputClass} value={s.checkout.buttonText} onChange={(e) => sec('checkout', { buttonText: e.target.value })} /></Field>
           <Field label="Lenke til salgsbetingelser"><input className={inputClass} value={s.checkout.termsUrl} onChange={(e) => sec('checkout', { termsUrl: e.target.value })} /></Field>
@@ -152,9 +178,9 @@ export function ShopSettingsPanel({ authHeaders, setLoading, isOwner }) {
           <Field label="Gavekort gyldig i måneder" hint="Minst 36 er vanlig (foreldelse)."><input type="number" min="1" className={inputClass} value={s.giftcards.validityMonths} onChange={(e) => sec('giftcards', { validityMonths: e.target.value })} /></Field>
         </div>
         <SaveBtn keys={['checkout', 'orders', 'giftcards']} />
-      </Card>
+      </Card>}
 
-      <Card title="Testmodus">
+      {show('test') && <Card title="Testmodus">
         <p className="text-sm text-gray-400 mb-3">Test butikken før lansering. Bestillinger får nummer TEST-1, TEST-2 … og telles ikke i rapporter. Skru av før ekte salg, og slett testdataene etterpå.</p>
         <Check label="Testmodus på (kunder ser et varsel i kassen)" checked={s.orders.testMode} onChange={(v) => sec('orders', { testMode: v })} />
         <div className="flex flex-wrap gap-2">
@@ -164,9 +190,9 @@ export function ShopSettingsPanel({ authHeaders, setLoading, isOwner }) {
             window.alert(`Slettet ${n.orders} testordrer, ${n.bookings} timer, ${n.giftcards} gavekort, ${n.subscriptions} abonnementer og ${n.customers} kunder.`);
           }, { confirm: 'Slette alle testordrer og alt de opprettet? Ekte ordrer røres ikke.' })}>Slett testdata</Btn>
         </div>
-      </Card>
+      </Card>}
 
-      <Card title="Timebestilling">
+      {show('bookings') && <Card title="Timebestilling">
         <div className="grid md:grid-cols-4 gap-3 mb-4">
           <Field label="Betaling">
             <select className={inputClass} value={s.bookings.payMode} onChange={(e) => sec('bookings', { payMode: e.target.value })}>
@@ -198,7 +224,7 @@ export function ShopSettingsPanel({ authHeaders, setLoading, isOwner }) {
         ))}
         <Btn kind="ghost" className="text-xs" onClick={() => sec('bookings', { staff: [...s.bookings.staff, { name: '', active: true, hours: null }] })}>Legg til ansatt</Btn>
         <SaveBtn keys={['bookings']} />
-      </Card>
+      </Card>}
     </div>
   );
 }
