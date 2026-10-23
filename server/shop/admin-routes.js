@@ -246,7 +246,9 @@ export function mountShopAdmin(router, shop, ops, { adminAuth, ownerAuth, privat
 
   router.get('/shop/admin/files', adminAuth, (_req, res) => {
     if (!existsSync(privateDir)) return res.json([]);
-    res.json(readdirSync(privateDir).filter((f) => !f.startsWith('.')).map((f) => ({ file: f, size: statSync(join(privateDir, f)).size })));
+    // Plain files only: the secrets/ folder next to them is not a shop file.
+    const files = readdirSync(privateDir, { withFileTypes: true }).filter((e) => e.isFile() && !e.name.startsWith('.'));
+    res.json(files.map((e) => ({ file: e.name, size: statSync(join(privateDir, e.name)).size })));
   });
   router.post('/shop/admin/files', ownerAuth, upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ message: 'Filtypen er ikke tillatt.' });
@@ -255,7 +257,7 @@ export function mountShopAdmin(router, shop, ops, { adminAuth, ownerAuth, privat
   router.delete('/shop/admin/files/:file', ownerAuth, (req, res) => {
     const name = clean(req.params.file, 200).replace(/[\\/]/g, '');
     const path = join(privateDir, name);
-    if (!name || !existsSync(path)) return res.status(404).json({ message: 'Fant ikke filen.' });
+    if (!name || !existsSync(path) || !statSync(path).isFile()) return res.status(404).json({ message: 'Fant ikke filen.' });
     unlinkSync(path);
     res.json({ ok: true });
   });

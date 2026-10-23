@@ -5,7 +5,7 @@
  */
 import express from 'express';
 import { randomBytes } from 'crypto';
-import { createReadStream, existsSync } from 'fs';
+import { createReadStream, existsSync, statSync } from 'fs';
 import { join } from 'path';
 import { hashToken } from './index.js';
 import { newId } from './db.js';
@@ -187,7 +187,8 @@ ${order.fulfillment.shipments.map((sh) => `<p>Sendt ${esc(new Date(sh.at).toLoca
     const product = store.getProductById(grant.productId);
     const file = product?.digitalFiles.find((f) => f.id === grant.fileId);
     const path = file ? join(privateDir, file.file) : '';
-    if (!file || !existsSync(path)) return res.status(404).type('html').send(await page({ title: 'Filen finnes ikke lenger', text: 'Ta kontakt med butikken.', ok: false }));
+    // Only a plain file directly in the private folder (never a folder such as secrets/).
+    if (!file || !existsSync(path) || !statSync(path).isFile()) return res.status(404).type('html').send(await page({ title: 'Filen finnes ikke lenger', text: 'Ta kontakt med butikken.', ok: false }));
     grant.downloadsLeft -= 1;
     db.save('downloads', rows);
     res.set({ 'Content-Disposition': `attachment; filename="${encodeURIComponent(file.name || file.file)}"`, 'Cache-Control': 'no-store' });

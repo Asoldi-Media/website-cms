@@ -4,7 +4,7 @@ How a client CMS signs people in and where it keeps its secrets. Code: `server/s
 
 ## Private data folder
 
-Each site keeps its secrets in `<dataPath>/cms/private/`. On Hostinger that is `~/.asoldi-cms-data/<siteKey>/cms/private/`, outside the deployed repo, so it survives every deploy.
+Each site keeps its secrets in `<dataPath>/cms/private/secrets/`. On Hostinger that is `~/.asoldi-cms-data/<siteKey>/cms/private/secrets/`, outside the deployed repo, so it survives every deploy. `cms/private/` itself holds the shop's digital product files; shop file names can never contain a slash, and the shop file routes only touch plain files, so no shop route reaches the `secrets/` folder.
 
 | File | What it is |
 |---|---|
@@ -17,7 +17,7 @@ Treat the folder like a password file. It never goes into Git, support uploads, 
 
 1. `adminSecret` passed to `createCmsRoutes` (tests and dev tools).
 2. `CMS_ADMIN_SECRET`, then `ADMIN_SECRET`, when the value has 16+ characters and is not a placeholder. A shorter value is ignored with a warning in the log (the value is never logged).
-3. Otherwise `secrets.json`.
+3. Otherwise `secrets/secrets.json`.
 
 Changing the secret signs everyone out and empties open carts.
 
@@ -39,13 +39,13 @@ Signatures are checked in constant time. A token with no expiry field counts as 
 
 - `CMS_ADMIN_USERNAME` / `CMS_ADMIN_PASSWORD` seed the first admin when the password has 8+ characters and is not on the common-password list in `server/secret.js`.
 - Otherwise the CMS generates a 24-character password and writes it to `initial-admin.json`. The log names the file, never the password.
-- The CMS never keeps a password from that list: at start, a stored admin password on the list is replaced the same way.
+- At start, a stored admin password on the `DEFAULT_ADMIN_PASSWORDS` list in `server/secret.js` is replaced the same way.
 
 ### When nobody knows the admin password
 
 1. **Hub client admin.** Set the client admin in the Asoldi hub. The CMS applies it on its next `GET /api/cms/config` and removes `initial-admin.json`. The heartbeat reports `adminApplied` and `initialAdminPending`.
 2. **Open CMS as Asoldi.** Sign in through hub SSO, then add a login with rank `admin` under Settings → Staff and hand it to the client.
-3. **Server shell.** Read `initial-admin.json` from the private data folder.
+3. **Server shell.** Read `cms/private/secrets/initial-admin.json` from the site's data folder.
 
 ## Public config
 

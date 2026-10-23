@@ -50,7 +50,7 @@ test('a new site gets a generated admin password in the private data folder, not
     assert.equal(initial.username, 'admin');
     assert.equal(initial.password.length, 24);
     assert.equal(initial.reason, 'first-start');
-    assert.equal(path.dirname(initialAdminPath(root)), path.join(root, 'cms', 'private'));
+    assert.equal(path.dirname(initialAdminPath(root)), path.join(root, 'cms', 'private', 'secrets'));
     assert.equal((await login(cms.base, 'admin', 'changeme')).status, 401, 'no built-in password');
     assert.equal((await login(cms.base, 'admin', initial.password)).status, 200);
     assert.ok(out.lines.some((line) => line.includes(initialAdminPath(root))), 'the log names the file');
@@ -192,7 +192,7 @@ test('the one-time login file is private JSON next to the secret', async () => {
     await waitFor(() => readInitialAdminFile(root));
     const raw = JSON.parse(readFileSync(initialAdminPath(root), 'utf8'));
     assert.deepEqual(Object.keys(raw).sort(), ['createdAt', 'note', 'password', 'reason', 'username']);
-    assert.ok(existsSync(path.join(root, 'cms', 'private', 'secrets.json')));
+    assert.ok(existsSync(path.join(root, 'cms', 'private', 'secrets', 'secrets.json')));
   } finally {
     await cms.close();
     rmSync(root, { recursive: true, force: true });

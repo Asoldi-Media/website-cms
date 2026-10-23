@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  cmsPrivateDir,
+  cmsSecretsDir,
   initialAdminCredentials,
   isStrongSecret,
   isUsableAdminPassword,
@@ -28,7 +28,7 @@ test('without env the secret is generated once in the private data folder and re
     assert.equal(first.source, 'disk');
     assert.equal(first.warning, '');
     assert.ok(first.adminSecret.length >= 43, 'at least 32 random bytes');
-    const file = path.join(cmsPrivateDir(root), 'secrets.json');
+    const file = path.join(cmsSecretsDir(root), 'secrets.json');
     const stored = JSON.parse(readFileSync(file, 'utf8'));
     assert.equal(stored.version, 1);
     assert.equal(stored.adminSecret, first.adminSecret);
@@ -36,10 +36,10 @@ test('without env the secret is generated once in the private data folder and re
     const second = resolveCmsSecrets({ dataPath: root, env: {} });
     assert.equal(second.adminSecret, first.adminSecret, 'a restart reuses the secret');
     assert.equal(second.createdAt, stored.createdAt);
-    assert.deepEqual(readdirSync(cmsPrivateDir(root)).sort(), ['secrets.json'], 'no temp files left behind');
+    assert.deepEqual(readdirSync(cmsSecretsDir(root)).sort(), ['secrets.json'], 'no temp files left behind');
     if (process.platform !== 'win32') {
       assert.equal(statSync(file).mode & 0o777, 0o600);
-      assert.equal(statSync(cmsPrivateDir(root)).mode & 0o777, 0o700);
+      assert.equal(statSync(cmsSecretsDir(root)).mode & 0o777, 0o700);
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -54,7 +54,7 @@ test('a strong env secret is used; a short or placeholder one is refused with a 
     assert.equal(fromEnv.source, 'env');
     assert.equal(fromEnv.adminSecret, strong);
     assert.equal(resolveCmsSecrets({ dataPath: root, env: { ADMIN_SECRET: strong } }).source, 'env', 'ADMIN_SECRET is the second env name');
-    assert.equal(existsSync(path.join(cmsPrivateDir(root), 'secrets.json')), false, 'env secret writes nothing to disk');
+    assert.equal(existsSync(path.join(cmsSecretsDir(root), 'secrets.json')), false, 'env secret writes nothing to disk');
     for (const value of [...KNOWN_DEFAULT_SECRETS, 'short-1234']) {
       const resolved = resolveCmsSecrets({ dataPath: root, env: { CMS_ADMIN_SECRET: value } });
       assert.equal(resolved.source, 'disk', value);
@@ -94,8 +94,8 @@ test('concurrent first starts agree on one secret', async () => {
     }));
     const secrets = await Promise.all(runs);
     assert.equal(new Set(secrets).size, 1, 'every process got the same secret');
-    assert.equal(JSON.parse(readFileSync(path.join(cmsPrivateDir(root), 'secrets.json'), 'utf8')).adminSecret, secrets[0]);
-    assert.deepEqual(readdirSync(cmsPrivateDir(root)), ['secrets.json']);
+    assert.equal(JSON.parse(readFileSync(path.join(cmsSecretsDir(root), 'secrets.json'), 'utf8')).adminSecret, secrets[0]);
+    assert.deepEqual(readdirSync(cmsSecretsDir(root)), ['secrets.json']);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -104,11 +104,11 @@ test('concurrent first starts agree on one secret', async () => {
 test('a damaged secrets file is set aside and replaced', () => {
   const root = tempData();
   try {
-    mkdirSync(cmsPrivateDir(root), { recursive: true });
-    writeFileSync(path.join(cmsPrivateDir(root), 'secrets.json'), '{"adminSecret":"');
+    mkdirSync(cmsSecretsDir(root), { recursive: true });
+    writeFileSync(path.join(cmsSecretsDir(root), 'secrets.json'), '{"adminSecret":"');
     const result = readOrCreateDiskSecrets(root);
     assert.ok(result.adminSecret.length >= 43);
-    assert.ok(readdirSync(cmsPrivateDir(root)).some((name) => name.startsWith('secrets.json.damaged-')));
+    assert.ok(readdirSync(cmsSecretsDir(root)).some((name) => name.startsWith('secrets.json.damaged-')));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

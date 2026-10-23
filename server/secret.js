@@ -1,7 +1,7 @@
 /**
  * Admin token secret and first admin login for this site.
  * An env value wins when it is strong; otherwise the value is generated once
- * under {dataPath}/cms/private (outside the deployed repo) and reused.
+ * under {dataPath}/cms/private/secrets (outside the deployed repo) and reused.
  */
 import { randomBytes } from 'crypto';
 import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'fs';
@@ -17,14 +17,21 @@ const DISK_SECRET_MIN_LENGTH = 32;
 const SECRETS_FILE = 'secrets.json';
 const INITIAL_ADMIN_FILE = 'initial-admin.json';
 
-/** {dataPath}/cms/private: shop files, secrets and the first admin login. Never served. */
+/** {dataPath}/cms/private: never served by URL; the shop keeps its digital product files here. */
 export function cmsPrivateDir(dataPath) {
     return join(String(dataPath || ''), 'cms', 'private');
+}
+/**
+ * {dataPath}/cms/private/secrets: the session secret and the first admin login. A subfolder, because
+ * shop file names can never contain a slash, so no shop file route can reach into it.
+ */
+export function cmsSecretsDir(dataPath) {
+    return join(cmsPrivateDir(dataPath), 'secrets');
 }
 function ensurePrivateDir(dataPath) {
     if (!dataPath)
         throw new Error('CMS secrets need a dataPath.');
-    const dir = cmsPrivateDir(dataPath);
+    const dir = cmsSecretsDir(dataPath);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     return dir;
 }
@@ -87,7 +94,7 @@ function readSecretsFile(file) {
 function sleepSync(ms) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
-/** Read or create {dataPath}/cms/private/secrets.json. Concurrent first starts agree on one secret. */
+/** Read or create {dataPath}/cms/private/secrets/secrets.json. Concurrent first starts agree on one secret. */
 export function readOrCreateDiskSecrets(dataPath) {
     const dir = ensurePrivateDir(dataPath);
     const file = join(dir, SECRETS_FILE);
@@ -150,7 +157,7 @@ export function initialAdminCredentials(env = process.env) {
 }
 /** Path of the one-time first admin login file. */
 export function initialAdminPath(dataPath) {
-    return join(cmsPrivateDir(dataPath), INITIAL_ADMIN_FILE);
+    return join(cmsSecretsDir(dataPath), INITIAL_ADMIN_FILE);
 }
 /** Write the generated first admin login (mode 0600). Only the path is ever logged. */
 export function writeInitialAdminFile(dataPath, { username, password, reason = 'first-start' }) {
