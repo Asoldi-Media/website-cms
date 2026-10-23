@@ -6,9 +6,10 @@ import path from 'node:path';
 import bcrypt from 'bcryptjs';
 import express from 'express';
 import createCmsRoutes from '../server/routes.js';
+import { createLoginLimiter } from '../server/auth-hardening.js';
 
 function clearAuthEnv() {
-  for (const key of ['CMS_ADMIN_SECRET', 'ADMIN_SECRET', 'CMS_ADMIN_PASSWORD', 'ADMIN_PASSWORD', 'CMS_ADMIN_USERNAME', 'ADMIN_USERNAME']) {
+  for (const key of ['CMS_ADMIN_SECRET', 'ADMIN_SECRET', 'CMS_ADMIN_PASSWORD', 'ADMIN_PASSWORD', 'CMS_ADMIN_USERNAME', 'ADMIN_USERNAME', 'CMS_TRUSTED_PROXY_HOPS']) {
     delete process.env[key];
   }
 }
@@ -144,5 +145,62 @@ test('a restart replaces only the default passwords releases shipped; a password
     assert.equal(existsSync(path.join(chosen, 'cms', 'private', 'initial-admin.json')), false);
   } finally {
     for (const root of roots) rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the per-IP limit uses the X-Forwarded-For hop the proxy appended, not the first one', async () => {
+  clearAuthEnv();
+  process.env.CMS_ADMIN_PASSWORD = 'forwarded-test-password';
+  const root = tempRoot();
+  try {
+    await withCms({ dataPath: root, loginLimiter: createLoginLimiter({ maxPerAccount: 100, maxPerIp: 5 }) }, async (base) => {
+      const statuses = [];
+      for (let i = 0; i < 8; i += 1) {
+        // The client writes any first hop it likes; the local proxy appends the address it saw.
+        statuses.push((await login(base, `nobody-${i}`, 'x', { 'X-Forwarded-For': `198.51.100.${i}, 203.0.113.50` })).status);
+      }
+      assert.deepEqual(statuses, [401, 401, 401, 401, 401, 429, 429, 429]);
+      assert.equal((await login(base, 'nobody-9', 'x', { 'X-Forwarded-For': '198.51.100.1, 203.0.113.51' })).status, 401, 'another client is not affected');
+    });
+  } finally {
+    clearAuthEnv();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('parallel wrong passwords cannot pass the account limit together', async () => {
+  clearAuthEnv();
+  const root = siteWithAdmin('owner', 'burst-test-password', 10);
+  try {
+    await withCms({ dataPath: root }, async (base) => {
+      const results = await Promise.all(
+        Array.from({ length: 30 }, (_, i) => login(base, 'owner', `burst-${i}`, { 'X-Forwarded-For': `203.0.113.${i + 1}` }))
+      );
+      const counts = {};
+      for (const { status } of results) counts[status] = (counts[status] || 0) + 1;
+      assert.deepEqual(counts, { 401: 10, 429: 20 }, 'only 10 attempts reach the password check');
+      assert.equal((await login(base, 'owner', 'burst-test-password', { 'X-Forwarded-For': '198.51.100.77' })).status, 429, 'the account stays locked');
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('failed sign-ins for unknown usernames from many addresses never unlock a real account', async () => {
+  clearAuthEnv();
+  const root = siteWithAdmin('owner', 'spray-test-password');
+  try {
+    await withCms({ dataPath: root, loginLimiter: createLoginLimiter({ maxKeys: 20 }) }, async (base) => {
+      for (let i = 0; i < 10; i += 1) {
+        assert.equal((await login(base, 'owner', `wrong-${i}`, { 'X-Forwarded-For': `203.0.113.${i + 1}` })).status, 401);
+      }
+      assert.equal((await login(base, 'owner', 'spray-test-password', { 'X-Forwarded-For': '198.51.100.200' })).status, 429);
+      for (let n = 0; n < 60; n += 1) {
+        assert.equal((await login(base, `spray-${n}`, 'x', { 'X-Forwarded-For': `192.0.2.${n + 1}` })).status, 401);
+      }
+      assert.equal((await login(base, 'owner', 'spray-test-password', { 'X-Forwarded-For': '198.51.100.201' })).status, 429, 'still locked');
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

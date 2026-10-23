@@ -2,7 +2,8 @@
  * Admin sign-in hardening for the client CMS.
  *
  * - Tokens: HMAC compared in constant time; every token carries `exp`.
- * - Logins: failed attempts are limited per account and per client IP.
+ * - Logins: attempts are limited per account and per client IP. The client IP
+ *   is the X-Forwarded-For hop the local proxy appended (CMS_TRUSTED_PROXY_HOPS).
  * - Public config: only an explicit list of keys reaches GET /api/cms/config.
  * - First admin: never a built-in password; a random one is written to
  *   <data>/cms/private/initial-admin.json until the hub sets the real one.
@@ -55,11 +56,60 @@ export function createTokenSigner(secret, { ttlMs = TOKEN_TTL_MS, now = () => Da
   };
 }
 
-export function clientIpFromRequest(req) {
-  const forwarded = String(req?.headers?.['x-forwarded-for'] || '').split(',')[0].trim();
-  return forwarded || String(req?.socket?.remoteAddress || req?.ip || '').trim();
+const MAX_ADDRESS_LENGTH = 64;
+
+function normalizeAddress(value) {
+  let address = String(value ?? '').trim();
+  if (address.toLowerCase().startsWith('::ffff:')) address = address.slice(7);
+  return address.slice(0, MAX_ADDRESS_LENGTH);
 }
 
+/** True for no address (a Unix socket), loopback, private or link-local: a reverse proxy on this host or network. */
+export function isProxyAddress(value) {
+  const a = normalizeAddress(value).toLowerCase();
+  if (!a || a === '::1' || a === 'localhost') return true;
+  if (/^(127|10)\./.test(a) || /^192\.168\./.test(a) || /^169\.254\./.test(a)) return true;
+  const private172 = /^172\.(\d{1,3})\./.exec(a);
+  if (private172 && Number(private172[1]) >= 16 && Number(private172[1]) <= 31) return true;
+  return /^f[cd][0-9a-f]{0,2}:/.test(a) || /^fe[89ab][0-9a-f]?:/.test(a);
+}
+
+/** Proxies in front of the CMS that append to X-Forwarded-For (`CMS_TRUSTED_PROXY_HOPS`, default 1, 0 ignores the header). */
+export function trustedProxyHops(env = process.env) {
+  const hops = Number.parseInt(String(env?.CMS_TRUSTED_PROXY_HOPS ?? ''), 10);
+  return Number.isInteger(hops) && hops >= 0 && hops <= 5 ? hops : 1;
+}
+
+/**
+ * Client address for the sign-in limits (the same rule as CMS 2.2). A direct connection counts by its
+ * socket address. A request from a local reverse proxy counts by the X-Forwarded-For hop that proxy
+ * appended (`hops` from the right), never by the first hop, which the client writes itself. A local
+ * proxy that sends no X-Forwarded-For (or `hops` 0) counts as its own address.
+ */
+export function clientIpFromRequest(req, { hops = trustedProxyHops() } = {}) {
+  const socket = req?.socket?.remoteAddress || '';
+  if (!isProxyAddress(socket)) return normalizeAddress(socket);
+  const forwarded = String(req?.headers?.['x-forwarded-for'] || '')
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!hops || !forwarded.length) return normalizeAddress(socket);
+  return normalizeAddress(forwarded[Math.max(0, forwarded.length - hops)]);
+}
+
+/**
+ * Sliding-window sign-in limiter (in memory, one Node process per site).
+ *
+ * - `begin(account, ip, { knownAccount })` runs before the password check: it refuses when a limit is
+ *   reached, and otherwise counts the attempt at once, so parallel requests cannot pass the limit
+ *   together. `ticket.succeed()` takes the attempt back and clears the account's failures; an attempt
+ *   that is never settled stays counted as a failure.
+ * - `knownAccount` marks the account key of a real account (the admin or a user). The table holds at
+ *   most `maxKeys` keys: when it is full, expired keys go first, then IP keys and keys for usernames
+ *   that do not exist (oldest first). A real account's key is never dropped inside its window; when
+ *   only those are left, new attempts are refused until room frees up.
+ * - `check`, `fail` and `succeed` are the same steps without a ticket.
+ */
 export function createLoginLimiter({
   windowMs = 15 * 60 * 1000,
   maxPerAccount = 10,
@@ -67,65 +117,151 @@ export function createLoginLimiter({
   maxKeys = 10000,
   now = () => Date.now(),
 } = {}) {
-  const failures = new Map();
+  /** key -> { times: ascending attempt times inside the window, known: true for a real account's key } */
+  const entries = new Map();
 
-  function recent(key) {
-    const t = now();
-    const list = (failures.get(key) || []).filter((ts) => t - ts < windowMs);
-    if (list.length) failures.set(key, list);
-    else failures.delete(key);
-    return list;
+  const accountKey = (account) => `a:${String(account ?? '').trim().toLowerCase()}`;
+  const ipKey = (ip) => `i:${normalizeAddress(ip)}`;
+  const limitOf = (key) => (key.startsWith('a:') ? maxPerAccount : maxPerIp);
+
+  function keysFor(account, ip) {
+    const keys = [];
+    if (String(account ?? '').trim()) keys.push(accountKey(account));
+    if (normalizeAddress(ip)) keys.push(ipKey(ip));
+    return keys;
   }
 
-  function sweep() {
-    if (failures.size < maxKeys / 2) return;
-    for (const key of [...failures.keys()]) recent(key);
-    // Still too many distinct keys: drop the oldest entries (Map keeps insertion order).
-    for (const key of failures.keys()) {
-      if (failures.size < maxKeys) break;
-      failures.delete(key);
+  function recent(key) {
+    const entry = entries.get(key);
+    if (!entry) return [];
+    const t = now();
+    while (entry.times.length && t - entry.times[0] >= windowMs) entry.times.shift();
+    if (!entry.times.length) {
+      entries.delete(key);
+      return [];
+    }
+    return entry.times;
+  }
+
+  const retryAfter = (times) => Math.max(1, Math.ceil((times[0] + windowMs - now()) / 1000));
+
+  function blocked(keys) {
+    for (const key of keys) {
+      const times = recent(key);
+      if (times.length >= limitOf(key)) return { ok: false, retryAfterSec: retryAfter(times) };
+    }
+    return null;
+  }
+
+  /** Makes room for `count` new keys; false when only real accounts' keys inside their window are left. */
+  function makeRoom(count) {
+    if (entries.size + count <= maxKeys) return true;
+    for (const key of [...entries.keys()]) recent(key);
+    // Free a tenth of the table at once so a full table is not scanned on every attempt.
+    const target = Math.max(0, Math.min(maxKeys - count, Math.floor(maxKeys * 0.9)));
+    for (const [key, entry] of entries) {
+      if (entries.size <= target) break;
+      if (!entry.known) entries.delete(key);
+    }
+    return entries.size + count <= maxKeys;
+  }
+
+  function fullRetryAfter() {
+    let soonest = Infinity;
+    for (const { times } of entries.values()) if (times.length) soonest = Math.min(soonest, times[0]);
+    return Number.isFinite(soonest) ? retryAfter([soonest]) : 1;
+  }
+
+  function record(keys, t, knownAccount) {
+    for (const key of keys) {
+      const times = recent(key);
+      const known = key.startsWith('a:') && (knownAccount || entries.get(key)?.known === true);
+      times.push(t);
+      const limit = limitOf(key);
+      if (times.length > limit) times.splice(0, times.length - limit);
+      entries.delete(key); // re-insert: the table is ordered by the latest attempt
+      entries.set(key, { times, known });
     }
   }
 
-  const accountKey = (account) => `a:${String(account ?? '').trim().toLowerCase()}`;
-  const ipKey = (ip) => `i:${String(ip ?? '').trim()}`;
+  function unrecord(keys, t) {
+    for (const key of keys) {
+      const entry = entries.get(key);
+      if (!entry) continue;
+      const at = entry.times.lastIndexOf(t);
+      if (at >= 0) entry.times.splice(at, 1);
+      if (!entry.times.length) entries.delete(key);
+    }
+  }
 
-  function retryAfterSec(list) {
-    return Math.max(1, Math.ceil((Math.min(...list) + windowMs - now()) / 1000));
+  /** Counts the attempt for every key, or returns a refusal. */
+  function admit(account, ip, knownAccount) {
+    const keys = keysFor(account, ip);
+    const verdict = blocked(keys);
+    if (verdict) return { verdict };
+    const fresh = keys.filter((key) => !entries.has(key)).length;
+    if (fresh && !makeRoom(fresh)) return { verdict: { ok: false, retryAfterSec: fullRetryAfter() } };
+    const t = now();
+    record(keys, t, knownAccount);
+    return { keys, t };
   }
 
   return {
+    begin(account, ip, { knownAccount = true } = {}) {
+      const { verdict, keys, t } = admit(account, ip, knownAccount);
+      if (verdict) return verdict;
+      let settled = false;
+      return {
+        ok: true,
+        ticket: {
+          /** Wrong password: the attempt stays counted. */
+          fail() {
+            settled = true;
+          },
+          /** Right password: the attempt is taken back and the account's failures are cleared. */
+          succeed() {
+            if (settled) return;
+            settled = true;
+            unrecord(keys, t);
+            if (String(account ?? '').trim()) entries.delete(accountKey(account));
+          },
+        },
+      };
+    },
     check(account, ip) {
-      if (account) {
-        const list = recent(accountKey(account));
-        if (list.length >= maxPerAccount) return { ok: false, retryAfterSec: retryAfterSec(list) };
-      }
-      if (ip) {
-        const list = recent(ipKey(ip));
-        if (list.length >= maxPerIp) return { ok: false, retryAfterSec: retryAfterSec(list) };
-      }
+      const keys = keysFor(account, ip);
+      const verdict = blocked(keys);
+      if (verdict) return verdict;
+      const fresh = keys.filter((key) => !entries.has(key)).length;
+      if (fresh && !makeRoom(fresh)) return { ok: false, retryAfterSec: fullRetryAfter() };
       return { ok: true };
     },
-    fail(account, ip) {
-      sweep();
-      const t = now();
-      for (const key of [account ? accountKey(account) : '', ip ? ipKey(ip) : ''].filter(Boolean)) {
-        failures.set(key, [...recent(key), t]);
-      }
+    fail(account, ip, { knownAccount = true } = {}) {
+      const keys = keysFor(account, ip);
+      const fresh = keys.filter((key) => !entries.has(key)).length;
+      if (fresh && !makeRoom(fresh)) return;
+      record(keys, now(), knownAccount);
     },
     succeed(account) {
-      if (account) failures.delete(accountKey(account));
+      if (String(account ?? '').trim()) entries.delete(accountKey(account));
+    },
+    /** Keys now held (tests and diagnostics). */
+    keys() {
+      return [...entries.keys()];
     },
   };
 }
 
-/** Express helper: returns true when the login may proceed, else answers 429. */
-export function guardLogin(limiter, req, res, account) {
-  const verdict = limiter.check(account, clientIpFromRequest(req));
-  if (verdict.ok) return true;
+/**
+ * Express guard, called right before the password check: returns a ticket when the attempt may go
+ * ahead (settle it with `succeed()` or `fail()`), else answers 429 with Retry-After and returns null.
+ */
+export function guardLogin(limiter, req, res, account, { knownAccount = true } = {}) {
+  const verdict = limiter.begin(account, clientIpFromRequest(req), { knownAccount });
+  if (verdict.ok) return verdict.ticket;
   res.setHeader('Retry-After', String(verdict.retryAfterSec));
   res.status(429).json({ message: 'Too many sign-in attempts. Try again later.' });
-  return false;
+  return null;
 }
 
 /** The only hub config keys that GET /api/cms/config may show to the public. */

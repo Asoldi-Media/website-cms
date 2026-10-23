@@ -34,7 +34,6 @@ import {
 import { resolveCmsSecrets } from './secret.js';
 import {
   SHIPPED_DEFAULT_PASSWORDS,
-  clientIpFromRequest,
   createLoginLimiter,
   createTokenSigner,
   guardLogin,
@@ -321,6 +320,15 @@ export default function createCmsRoutes({
     console.error('[cms] Admin setup failed:', error?.message || error);
   });
 
+  /** True for the admin's or a user's username; their limiter keys are never dropped early. */
+  async function isKnownAccount(username) {
+    const name = String(username ?? '').trim().toLowerCase();
+    if (!name) return false;
+    const admin = await store.getAdmin();
+    if (String(admin?.username ?? '').trim().toLowerCase() === name) return true;
+    return Boolean(store.getUserByUsername(username) || store.getUserByUsername(name));
+  }
+
   function refuseWeakPassword(res, password) {
     const problem = newPasswordProblem(password);
     if (!problem) return false;
@@ -353,20 +361,21 @@ export default function createCmsRoutes({
     if (!username || !password) {
       return res.status(400).json({ message: 'Username and password required' });
     }
-    if (!guardLogin(loginLimiter, req, res, username)) return;
     await adminReady;
+    const attempt = guardLogin(loginLimiter, req, res, username, { knownAccount: await isKnownAccount(username) });
+    if (!attempt) return;
     const valid = await store.verifyAdmin(username, password);
     if (valid) {
-      loginLimiter.succeed(username);
+      attempt.succeed();
       const token = signToken({ role: 'admin', username, rank: 'admin', at: Date.now() });
       return res.json({ token, rank: 'admin', username, name: username });
     }
     const staff = await store.verifyEmployee(username, password);
     if (!staff.ok) {
-      loginLimiter.fail(username, clientIpFromRequest(req));
+      attempt.fail();
       return res.status(401).json({ message: 'Invalid credentials' });
     }
-    loginLimiter.succeed(username);
+    attempt.succeed();
     const rank = normalizeRank(staff.user.rank);
     const token = signToken({ role: 'staff', userId: staff.user.id, username: staff.user.username, rank, at: Date.now() });
     return res.json({ token, rank, username: staff.user.username, name: staff.user.name || staff.user.username });
@@ -421,14 +430,16 @@ export default function createCmsRoutes({
       return res.status(400).json({ message: 'Current and new password required' });
     }
     if (refuseWeakPassword(res, newPassword)) return;
-    if (!guardLogin(loginLimiter, req, res, req.actor.username)) return;
+    const attempt = guardLogin(loginLimiter, req, res, req.actor.username);
+    if (!attempt) return;
     const wrongCurrent = () => {
-      loginLimiter.fail(req.actor.username, clientIpFromRequest(req));
+      attempt.fail();
       return res.status(401).json({ message: 'Current password is wrong' });
     };
     if (req.actor.rank === 'admin') {
       const valid = await store.verifyAdmin(req.actor.username, currentPassword);
       if (!valid) return wrongCurrent();
+      attempt.succeed();
       const admin = await store.getAdmin();
       if (!admin) return res.status(500).json({ message: 'Admin not found' });
       await store.setAdminCredentials(admin.username, newPassword);
@@ -438,6 +449,7 @@ export default function createCmsRoutes({
     if (!user) return res.status(404).json({ message: 'User not found' });
     const valid = await store.verifyPassword(currentPassword, user.passwordHash);
     if (!valid) return wrongCurrent();
+    attempt.succeed();
     await store.updateUserPassword(user.id, newPassword);
     res.json({ ok: true });
   });
@@ -447,13 +459,15 @@ export default function createCmsRoutes({
     if (!username || !password) {
       return res.status(400).json({ message: 'Username and password required' });
     }
-    if (!guardLogin(loginLimiter, req, res, username)) return;
+    await adminReady;
+    const attempt = guardLogin(loginLimiter, req, res, username, { knownAccount: await isKnownAccount(username) });
+    if (!attempt) return;
     const result = await store.verifyEmployee(username, password);
     if (!result.ok) {
-      loginLimiter.fail(username, clientIpFromRequest(req));
+      attempt.fail();
       return res.status(401).json({ message: 'Invalid username or password' });
     }
-    loginLimiter.succeed(username);
+    attempt.succeed();
     const token = signToken({ role: 'employee', userId: result.user.id, at: Date.now() });
     res.json({ token, user: result.user });
   });
