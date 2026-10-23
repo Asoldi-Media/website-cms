@@ -32,6 +32,7 @@ import {
   wantsJson,
 } from './forms.js';
 import { resolveCmsSecrets } from './secret.js';
+import { createHubCredential } from './hub-credential.js';
 import {
   MAX_PASSWORD_LENGTH,
   MAX_USERNAME_LENGTH,
@@ -133,8 +134,14 @@ export default function createCmsRoutes({
   // generated secret in <data>/cms/private/secrets.json.
   adminSecret,
   loginLimiter = createLoginLimiter(),
+  // false: do not enroll the site credential on its own (tests, local tools); the proof route still answers.
+  hubEnroll = true,
 } = {}) {
   const resolvedDataPath = resolveCmsDataPath({ dataPath, siteKey });
+  // Site credential for calls to the hub (server/hub-credential.js): made once, enrolled a few seconds after start.
+  const hubCredential = createHubCredential({ dataPath: resolvedDataPath, hubUrl, siteKey, autoEnroll: hubEnroll !== false });
+  hubCredential.start();
+  const hubFetch = (url, init) => hubCredential.hubFetch(url, init);
   const tokens = createTokenSigner(adminSecret || resolveCmsSecrets({ dataPath: resolvedDataPath }).adminSecret);
   const router = answerAsyncErrors(express.Router());
   const store = createStore(resolvedDataPath);
@@ -212,7 +219,7 @@ export default function createCmsRoutes({
       ...extra,
     };
     try {
-      const r = await fetch(`${base}/api/client-forms/${encodeURIComponent(siteKey)}`, {
+      const r = await hubFetch(`${base}/api/client-forms/${encodeURIComponent(siteKey)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(payload),
@@ -328,7 +335,10 @@ export default function createCmsRoutes({
     if (!siteKey || !hubUrl) return fallbackConfig();
     try {
       const base = hubUrl.replace(/\/$/, '');
-      const r = await fetch(`${base}/api/hub/site-config?site_key=${encodeURIComponent(siteKey)}`);
+      // The pending client admin password comes only with this site's credential.
+      const r = await hubFetch(`${base}/api/hub/site-config?site_key=${encodeURIComponent(siteKey)}`, {
+        headers: { Accept: 'application/json', 'x-site-key': siteKey },
+      });
       if (!r.ok) return fallbackConfig();
       const data = await r.json();
       const config = withPackageVersion(data);
@@ -353,7 +363,9 @@ export default function createCmsRoutes({
       : host
         ? `${proto}://${host}/admin`
         : '';
-    fetch(`${base}/api/hub/heartbeat`, {
+    // Enroll first when needed (paused after a failure), so the hub can act on this heartbeat.
+    void hubCredential.ensureEnrolled();
+    hubFetch(`${base}/api/hub/heartbeat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -398,6 +410,15 @@ export default function createCmsRoutes({
     const config = await fetchHubConfig();
     sendHeartbeat(req, config);
     res.json(publicConfig(config));
+  });
+
+  // The hub confirms an enrollment by asking this site's own domain for the proof of a nonce the
+  // CMS sent it in the last two minutes (server/hub-credential.js). Anything else is 404.
+  router.get('/hub-enroll-proof', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const proof = hubCredential.proofFor(req.query.nonce);
+    if (!proof) return res.status(404).json({ message: 'Not found' });
+    return res.json({ proof });
   });
 
   router.get('/catalog', async (req, res) => {
