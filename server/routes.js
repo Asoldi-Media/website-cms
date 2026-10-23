@@ -39,7 +39,7 @@ import { contentCoverage, resolvePublicHtml } from './html-tracker.js';
 import { cmsCapabilities } from './capabilities.js';
 import { clearInitialAdminFile, initialAdminCredentials, readInitialAdminFile, resolveCmsSecrets, writeInitialAdminFile, DEFAULT_ADMIN_PASSWORDS } from './secret.js';
 import { createTokenSigner, LOCAL_TOKEN_MS, LOGIN_TOKEN_MS } from './admin-token.js';
-import { createLoginLimiter, clientIp, guardLogin } from './login-limiter.js';
+import { createLoginLimiter, clientIp, guardLogin, readLoginBody } from './login-limiter.js';
 import { publicConfig, readPackageBuild } from './public-config.js';
 import { applyFieldMap, errorMessageFor, formsRuntimeScript, looksLikeBot, publicSubmission, safeReturnPath, successMessageFor, wantsJson, } from './forms.js';
 export { resolveCmsDataPath } from './data-path.js';
@@ -450,36 +450,37 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
         }
         const at = Date.now();
         const token = signToken({ role: 'admin', username: 'asoldi-support', rank: 'admin', at, exp: at + SSO_SESSION_MS, sso: true, by: result.by });
-        sso.audit({ action: 'sso-login', by: result.by, ip: String(req.get('x-forwarded-for') || req.ip || '').split(',')[0].trim() });
+        sso.audit({ action: 'sso-login', by: result.by, ip: clientIp(req) });
         res.type('html').send(ssoLandingHtml(token));
     });
     router.get('/admin/audit', allow(), (_req, res) => {
         res.json(sso.auditLog().slice(-100).reverse());
     });
     router.post('/admin/login', async (req, res) => {
-        const { username, password } = req.body || {};
-        if (!username || !password) {
-            res.status(400).json({ message: 'Username and password required' });
+        const { username, password, error } = readLoginBody(req.body);
+        if (error) {
+            res.status(400).json({ message: error });
             return;
         }
-        if (!guardLogin(loginLimiter, req, res, username))
+        const ip = clientIp(req);
+        if (!guardLogin(loginLimiter, req, res, username, ip))
             return;
         // A sign-in right after start waits for first-start admin setup instead of failing.
         await ensureAdmin();
         const valid = await store.verifyAdmin(username, password);
         if (valid) {
-            loginLimiter.succeed(username);
+            loginLimiter.succeed(username, ip);
             const token = signToken({ role: 'admin', username, rank: 'admin', at: Date.now() });
             res.json({ token, rank: 'admin', username, name: username });
             return;
         }
         const staff = await store.verifyEmployee(username, password);
         if (!staff.ok || !staff.user) {
-            loginLimiter.fail(username, clientIp(req));
+            loginLimiter.fail(username, ip);
             res.status(401).json({ message: 'Invalid credentials' });
             return;
         }
-        loginLimiter.succeed(username);
+        loginLimiter.succeed(username, ip);
         const rank = normalizeRank(staff.user.rank);
         const token = signToken({ role: 'staff', userId: staff.user.id, username: staff.user.username, rank, at: Date.now() });
         res.json({ token, rank, username: staff.user.username, name: staff.user.name || staff.user.username });
@@ -565,20 +566,21 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
         res.json({ ok: true });
     });
     router.post('/auth/login', async (req, res) => {
-        const { username, password } = req.body || {};
-        if (!username || !password) {
-            res.status(400).json({ message: 'Username and password required' });
+        const { username, password, error } = readLoginBody(req.body);
+        if (error) {
+            res.status(400).json({ message: error });
             return;
         }
-        if (!guardLogin(loginLimiter, req, res, username))
+        const ip = clientIp(req);
+        if (!guardLogin(loginLimiter, req, res, username, ip))
             return;
         const result = await store.verifyEmployee(username, password);
         if (!result.ok || !result.user) {
-            loginLimiter.fail(username, clientIp(req));
+            loginLimiter.fail(username, ip);
             res.status(401).json({ message: 'Invalid username or password' });
             return;
         }
-        loginLimiter.succeed(username);
+        loginLimiter.succeed(username, ip);
         const token = signToken({ role: 'employee', userId: result.user.id, at: Date.now() });
         res.json({ token, user: result.user });
     });

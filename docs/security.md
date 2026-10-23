@@ -33,7 +33,19 @@ Signatures are checked in constant time. A token with no expiry field counts as 
 
 ## Sign-in limits
 
-`POST /api/cms/admin/login` and `POST /api/cms/auth/login` allow 10 failed attempts per username and 50 per client IP in 15 minutes. After that the answer is `429` with `Retry-After`, even for the right password. A successful sign-in clears the username's count. Counts live in memory, so a restart clears them.
+`POST /api/cms/admin/login` and `POST /api/cms/auth/login` count failed attempts over 15 minutes:
+
+| Count | Limit |
+|---|---|
+| One username from one client address | 10 |
+| One username from all addresses | 100 |
+| One client address, all usernames | 50 |
+
+Past a limit the answer is `429` with `Retry-After`, even for the right password. A successful sign-in clears the count for that username on that address, so the owner signing in from their own address is not blocked by failures from elsewhere until the 100 ceiling.
+
+- **Client address.** A direct connection counts by its socket address. When the request comes from a reverse proxy on the same host or private network (loopback, private or link-local address, or a Unix socket), the CMS uses the last `X-Forwarded-For` hop, which that proxy appended. `CMS_TRUSTED_PROXY_HOPS` (default `1`) sets how many proxies append to the header; `0` ignores it. A proxy that passes the client's header through without appending gives the client control of its address; the per-username limits still apply.
+- **Input.** A username over 200 characters, a password over 1024, or a value that is not text is refused with `400` before anything is counted.
+- **Memory.** Usernames are stored as short hashes and addresses are capped at 64 characters. The table holds at most 10,000 keys (the oldest go first) and expired keys are dropped once a minute. Counts live in memory, so a restart clears them.
 
 ## First admin login
 
