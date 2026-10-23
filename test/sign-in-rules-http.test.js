@@ -206,7 +206,14 @@ test('the per-IP limit uses the X-Forwarded-For hop the proxy appended, not the 
   }
 });
 
-test('parallel wrong passwords cannot pass the account limit together', async () => {
+/** Counts answers by status, e.g. { 401: 10, 429: 20 }. */
+function countStatuses(results) {
+  const counts = {};
+  for (const { status } of results) counts[status] = (counts[status] || 0) + 1;
+  return counts;
+}
+
+test('parallel wrong passwords cannot pass the limits together', async () => {
   clearAuthEnv();
   const root = siteWithAdmin('owner', 'burst-test-password');
   let gate = null;
@@ -215,12 +222,22 @@ test('parallel wrong passwords cannot pass the account limit together', async ()
       // One sign-in first, so start-up (which checks the stored hash too) is over before checks are held.
       assert.equal((await login(base, 'nobody', 'x')).status, 401);
       gate = holdPasswordChecks(30);
+      const fromOne = { 'X-Forwarded-For': '203.0.113.1' };
+      const results = await Promise.all(Array.from({ length: 30 }, (_, i) => login(base, 'owner', `burst-${i}`, fromOne)));
+      assert.deepEqual(countStatuses(results), { 401: 10, 429: 20 }, 'only 10 attempts from one address reach the password check');
+      assert.equal(gate.reached(), 10, 'only 10 password checks started');
+      gate.restore();
+      assert.equal((await login(base, 'owner', 'burst-test-password', fromOne)).status, 429, 'that address stays locked for the account');
+      assert.equal((await login(base, 'owner', 'burst-test-password', { 'X-Forwarded-For': '198.51.100.77' })).status, 200, 'the owner elsewhere is not');
+    });
+    // The per-username ceiling holds the same way for parallel attempts from many addresses.
+    await withCms({ dataPath: root, loginLimiter: createLoginLimiter({ maxPerAccount: 10 }) }, async (base) => {
+      assert.equal((await login(base, 'nobody', 'x')).status, 401);
+      gate = holdPasswordChecks(30);
       const results = await Promise.all(
         Array.from({ length: 30 }, (_, i) => login(base, 'owner', `burst-${i}`, { 'X-Forwarded-For': `203.0.113.${i + 1}` }))
       );
-      const counts = {};
-      for (const { status } of results) counts[status] = (counts[status] || 0) + 1;
-      assert.deepEqual(counts, { 401: 10, 429: 20 }, 'only 10 attempts reach the password check');
+      assert.deepEqual(countStatuses(results), { 401: 10, 429: 20 }, 'only 10 attempts reach the password check');
       assert.equal(gate.reached(), 10, 'only 10 password checks started');
       gate.restore();
       assert.equal((await login(base, 'owner', 'burst-test-password', { 'X-Forwarded-For': '198.51.100.77' })).status, 429, 'the account stays locked');
@@ -231,11 +248,44 @@ test('parallel wrong passwords cannot pass the account limit together', async ()
   }
 });
 
+test('wrong passwords from other addresses do not lock the owner out of their own address', async () => {
+  clearAuthEnv();
+  const root = siteWithAdmin('admin', 'owner-real-password');
+  try {
+    await withCms({ dataPath: root }, async (base) => {
+      // Ten wrong passwords, each from another client address (the hop the local proxy appended).
+      for (let i = 0; i < 10; i += 1) {
+        assert.equal((await login(base, 'admin', `guess-${i}`, { 'X-Forwarded-For': `198.51.100.${i + 1}` })).status, 401);
+      }
+      const owner = { 'X-Forwarded-For': '203.0.113.77' };
+      assert.equal((await login(base, 'admin', 'owner-real-password', owner)).status, 200, 'the owner signs in from their own address');
+      // Ten more from one address lock that address for the account, and only that address.
+      const one = { 'X-Forwarded-For': '192.0.2.10' };
+      for (let i = 0; i < 10; i += 1) assert.equal((await login(base, 'admin', `again-${i}`, one)).status, 401);
+      assert.equal((await login(base, 'admin', 'owner-real-password', one)).status, 429);
+      assert.equal((await login(base, 'admin', 'owner-real-password', owner)).status, 200, 'the owner is still not locked');
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('failed sign-ins for unknown usernames from many addresses never unlock a real account', async () => {
   clearAuthEnv();
   const root = siteWithAdmin('owner', 'spray-test-password');
   try {
+    // Locked for one address (10 failures from it).
     await withCms({ dataPath: root, loginLimiter: createLoginLimiter({ maxKeys: 20 }) }, async (base) => {
+      const one = { 'X-Forwarded-For': '203.0.113.1' };
+      for (let i = 0; i < 10; i += 1) assert.equal((await login(base, 'owner', `wrong-${i}`, one)).status, 401);
+      assert.equal((await login(base, 'owner', 'spray-test-password', one)).status, 429);
+      for (let n = 0; n < 60; n += 1) {
+        assert.equal((await login(base, `spray-${n}`, 'x', { 'X-Forwarded-For': `192.0.2.${n + 1}` })).status, 401);
+      }
+      assert.equal((await login(base, 'owner', 'spray-test-password', one)).status, 429, 'still locked');
+    });
+    // Locked everywhere (the per-username ceiling, small here for speed).
+    await withCms({ dataPath: root, loginLimiter: createLoginLimiter({ maxKeys: 30, maxPerAccount: 10 }) }, async (base) => {
       for (let i = 0; i < 10; i += 1) {
         assert.equal((await login(base, 'owner', `wrong-${i}`, { 'X-Forwarded-For': `203.0.113.${i + 1}` })).status, 401);
       }

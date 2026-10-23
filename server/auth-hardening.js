@@ -3,8 +3,9 @@
  *
  * - Tokens: HMAC compared in constant time; every token carries `exp`.
  * - Logins: the username and password must be text of a bounded length. Attempts
- *   are limited per account and per client IP. The client IP is the
- *   X-Forwarded-For hop the local proxy appended (CMS_TRUSTED_PROXY_HOPS).
+ *   are limited per username and client IP together, per username and per client
+ *   IP. The client IP is the X-Forwarded-For hop the local proxy appended
+ *   (CMS_TRUSTED_PROXY_HOPS).
  * - Public config: only an explicit list of keys reaches GET /api/cms/config.
  * - First admin: never a built-in password; a random one is written to
  *   <data>/cms/private/initial-admin.json until the hub sets the real one.
@@ -114,16 +115,21 @@ export function clientIpFromRequest(req, { hops = trustedProxyHops() } = {}) {
 }
 
 /**
- * Sliding-window sign-in limiter (in memory, one Node process per site).
+ * Sliding-window sign-in limiter (in memory, one Node process per site). The limits are the same as
+ * CMS 2.2: one username from one client address (`maxPerPair`, 10), one username from all addresses
+ * (`maxPerAccount`, 100) and one address for all usernames (`maxPerIp`, 50), each per 15 minutes.
+ * Failures from other addresses therefore do not lock the owner out of their own address until the
+ * per-username ceiling.
  *
  * - `begin(account, ip, { knownAccount })` runs before the password check: it refuses when a limit is
- *   reached, and otherwise counts the attempt at once, so parallel requests cannot pass the limit
- *   together. `ticket.succeed()` takes the attempt back and clears the account's failures; an attempt
- *   that is never settled stays counted as a failure.
- * - `knownAccount` marks the account key of a real account (the admin or a user). The table holds at
- *   most `maxKeys` keys: when it is full, expired keys go first, then IP keys and keys for usernames
- *   that do not exist (oldest first). A real account's key is never dropped inside its window; when
- *   only those are left, new attempts are refused until room frees up.
+ *   reached, and otherwise counts the attempt at once, so parallel requests cannot pass the limits
+ *   together. `ticket.succeed()` takes the attempt back and clears the username's count for that
+ *   address; an attempt that is never settled stays counted as a failure.
+ * - `knownAccount` marks the username keys (per username, and per username and address) of a real
+ *   account (the admin or a user). The table holds at most `maxKeys` keys: when it is full, expired
+ *   keys go first, then IP keys and keys for usernames that do not exist (oldest first). A real
+ *   account's keys are never dropped inside their window; when only those are left, new attempts are
+ *   refused until room frees up. A real account holds at most `maxPerAccount` + 1 keys in a window.
  * - Memory stays bounded: usernames are kept as short hashes, addresses are capped, every key keeps at
  *   most its limit of timestamps, and the table holds at most `maxKeys` keys.
  * - `check`, `fail` and `succeed` are the same steps without a ticket.
@@ -133,7 +139,8 @@ const accountName = (account) => String(account ?? '').slice(0, MAX_HASHED_INPUT
 
 export function createLoginLimiter({
   windowMs = 15 * 60 * 1000,
-  maxPerAccount = 10,
+  maxPerPair = 10,
+  maxPerAccount = 100,
   maxPerIp = 50,
   maxKeys = 10000,
   now = () => Date.now(),
@@ -141,21 +148,25 @@ export function createLoginLimiter({
   /** key -> { times: ascending attempt times inside the window, known: true for a real account's key } */
   const entries = new Map();
 
+  const pairKey = (name, ip) => `p:${shortHash(`${name}\n${normalizeAddress(ip)}`)}`;
   const accountKey = (name) => `a:${shortHash(name)}`;
   const ipKey = (ip) => `i:${normalizeAddress(ip)}`;
-  const limitOf = (key) => (key.startsWith('a:') ? maxPerAccount : maxPerIp);
+  const limitOf = (key) => (key[0] === 'p' ? maxPerPair : key[0] === 'a' ? maxPerAccount : maxPerIp);
+  /** Keys that belong to a username (and so may belong to a real account). */
+  const isUsernameKey = (key) => key[0] === 'p' || key[0] === 'a';
 
   function keysFor(account, ip) {
     const keys = [];
     const name = accountName(account);
-    if (name) keys.push(accountKey(name));
+    if (name) keys.push(pairKey(name, ip), accountKey(name));
     if (normalizeAddress(ip)) keys.push(ipKey(ip));
     return keys;
   }
 
-  function forget(account) {
+  /** Clears the username's count for this address; the per-username and per-address counts keep running. */
+  function clearPair(account, ip) {
     const name = accountName(account);
-    if (name) entries.delete(accountKey(name));
+    if (name) entries.delete(pairKey(name, ip));
   }
 
   function recent(key) {
@@ -202,7 +213,7 @@ export function createLoginLimiter({
   function record(keys, t, knownAccount) {
     for (const key of keys) {
       const times = recent(key);
-      const known = key.startsWith('a:') && (knownAccount || entries.get(key)?.known === true);
+      const known = isUsernameKey(key) && (knownAccount || entries.get(key)?.known === true);
       times.push(t);
       const limit = limitOf(key);
       if (times.length > limit) times.splice(0, times.length - limit);
@@ -245,12 +256,12 @@ export function createLoginLimiter({
           fail() {
             settled = true;
           },
-          /** Right password: the attempt is taken back and the account's failures are cleared. */
+          /** Right password: the attempt is taken back and the username's count for this address is cleared. */
           succeed() {
             if (settled) return;
             settled = true;
             unrecord(keys, t);
-            forget(account);
+            clearPair(account, ip);
           },
         },
       };
@@ -269,8 +280,8 @@ export function createLoginLimiter({
       if (fresh && !makeRoom(fresh)) return;
       record(keys, now(), knownAccount);
     },
-    succeed(account) {
-      forget(account);
+    succeed(account, ip) {
+      clearPair(account, ip);
     },
     /** Keys now held (tests and diagnostics). */
     keys() {

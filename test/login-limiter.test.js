@@ -13,8 +13,10 @@ import {
   trustedProxyHops,
 } from '../server/auth-hardening.js';
 
-/** Account keys hold a short hash of the trimmed, lower-cased username, never the username itself. */
-const accountKeyOf = (name) => `a:${createHash('sha256').update(name.trim().toLowerCase()).digest('hex').slice(0, 32)}`;
+/** Username keys hold a short hash of the trimmed, lower-cased username, never the username itself. */
+const shortHash = (text) => createHash('sha256').update(text).digest('hex').slice(0, 32);
+const accountKeyOf = (name) => `a:${shortHash(name.trim().toLowerCase())}`;
+const pairKeyOf = (name, ip) => `p:${shortHash(`${name.trim().toLowerCase()}\n${ip}`)}`;
 
 const WINDOW = 15 * 60 * 1000;
 const request = (remoteAddress, forwardedFor) => ({
@@ -74,16 +76,45 @@ test('CMS_TRUSTED_PROXY_HOPS: default 1, 0 to 5 allowed, anything else falls bac
   }
 });
 
+/** Every attempt holds three keys: the username and address together, the username, and the address. */
+const keysOf = (name, ip) => [pairKeyOf(name, ip), accountKeyOf(name), ...(ip ? [`i:${ip}`] : [])];
+
+test('limits: 10 per username from one address, 100 per username, 50 per address (the CMS 2.2 limits)', () => {
+  const limiter = createLoginLimiter();
+  // Ten failures from ten other addresses do not lock the owner's own address.
+  for (let i = 0; i < 10; i += 1) limiter.fail('admin', `198.51.100.${i + 1}`, { knownAccount: true });
+  assert.equal(limiter.check('admin', '203.0.113.77').ok, true, 'the owner can still sign in from their own address');
+  const owner = limiter.begin('admin', '203.0.113.77');
+  assert.equal(owner.ok, true);
+  owner.ticket.succeed();
+  // Ten failures from one address lock that address for that username only.
+  for (let i = 0; i < 10; i += 1) limiter.fail('admin', '192.0.2.10', { knownAccount: true });
+  assert.equal(limiter.check('admin', '192.0.2.10').ok, false, 'locked for that address after 10');
+  assert.equal(limiter.check('Admin ', '192.0.2.10').ok, false, 'case and spaces do not matter');
+  assert.equal(limiter.check('editor', '192.0.2.10').ok, true, 'other usernames from that address still try');
+  assert.equal(limiter.check('admin', '203.0.113.77').ok, true, 'the owner is still not locked');
+  // The username ceiling: 100 failures from all addresses lock it everywhere.
+  for (let i = 0; i < 80; i += 1) limiter.fail('admin', `198.18.${i >> 8}.${i & 255}`, { knownAccount: true });
+  assert.equal(limiter.check('admin', '203.0.113.77').ok, false, 'locked everywhere after 100');
+  // The address limit: 50 failures from one address, over any usernames.
+  for (let i = 0; i < 50; i += 1) limiter.fail(`nobody-${i}`, '192.0.2.99', { knownAccount: false });
+  assert.equal(limiter.check('someone-else', '192.0.2.99').ok, false, 'locked after 50 from one address');
+  assert.equal(limiter.check('someone-else', '192.0.2.98').ok, true);
+});
+
 test('a full key table never drops a real account that is still locked', () => {
-  const limiter = createLoginLimiter({ maxKeys: 200 });
+  const limiter = createLoginLimiter({ maxKeys: 300 });
   for (let i = 0; i < 10; i += 1) limiter.fail('admin', '203.0.113.5', { knownAccount: true });
-  assert.equal(limiter.check('admin', '198.51.100.1').ok, false, 'locked after 10 failures');
+  for (let i = 0; i < 100; i += 1) limiter.fail('owner', `198.18.0.${i}`, { knownAccount: true });
+  assert.equal(limiter.check('admin', '203.0.113.5').ok, false, 'locked for that address after 10 failures');
+  assert.equal(limiter.check('owner', '198.51.100.1').ok, false, 'locked everywhere after 100 failures');
   // Cheap failures: unknown usernames from ever-new addresses.
   for (let n = 0; n < 5000; n += 1) {
     limiter.fail(`spray-${n}`, `10.${(n >> 16) & 255}.${(n >> 8) & 255}.${n & 255}`, { knownAccount: false });
   }
-  assert.equal(limiter.check('admin', '198.51.100.1').ok, false, 'still locked after 5000 other failures');
-  if (typeof limiter.keys === 'function') assert.ok(limiter.keys().length <= 200, 'the table stays within maxKeys');
+  assert.equal(limiter.check('admin', '203.0.113.5').ok, false, 'still locked after 5000 other failures');
+  assert.equal(limiter.check('owner', '198.51.100.1').ok, false, 'still locked after 5000 other failures');
+  assert.ok(limiter.keys().length <= 300, 'the table stays within maxKeys');
 });
 
 test('at the cap, IP keys and unknown usernames go first, oldest first', () => {
@@ -93,10 +124,10 @@ test('at the cap, IP keys and unknown usernames go first, oldest first', () => {
   for (let n = 0; n < 20; n += 1) limiter.fail(`spray-${n}`, `198.51.100.${n}`, { knownAccount: false });
   const keys = limiter.keys();
   assert.ok(keys.length <= 10, String(keys.length));
-  assert.ok(keys.includes(accountKeyOf('owner')), 'the real account stays');
-  assert.ok(!keys.includes(accountKeyOf('ghost')), 'an old unknown username goes');
+  assert.ok(keys.includes(accountKeyOf('owner')) && keys.includes(pairKeyOf('owner', '203.0.113.1')), 'the real account stays');
+  assert.ok(!keys.includes(accountKeyOf('ghost')) && !keys.includes(pairKeyOf('ghost', '203.0.113.2')), 'an old unknown username goes');
   assert.ok(!keys.includes('i:203.0.113.1') && !keys.includes('i:203.0.113.2'), 'old IP keys go');
-  assert.ok(keys.includes(accountKeyOf('spray-19')) && keys.includes('i:198.51.100.19'), 'the newest keys stay');
+  for (const key of keysOf('spray-19', '198.51.100.19')) assert.ok(keys.includes(key), 'the newest keys stay');
 });
 
 test('a known account stays protected when later attempts look unknown (case, spacing)', () => {
@@ -105,34 +136,45 @@ test('a known account stays protected when later attempts look unknown (case, sp
   limiter.fail(' owner ', '', { knownAccount: false });
   for (let n = 0; n < 10; n += 1) limiter.fail(`spray-${n}`, '', { knownAccount: false });
   assert.ok(limiter.keys().includes(accountKeyOf('owner')));
+  assert.ok(limiter.keys().includes(pairKeyOf('owner', '')));
 });
 
 test('when only real accounts inside their window are left, new attempts are refused (fails closed)', () => {
   let t = 1_000_000;
-  const limiter = createLoginLimiter({ maxKeys: 4, now: () => t });
+  const limiter = createLoginLimiter({ maxKeys: 8, now: () => t });
   for (const name of ['a1', 'a2', 'a3', 'a4']) limiter.fail(name, '', { knownAccount: true });
+  const realKeys = ['a1', 'a2', 'a3', 'a4'].flatMap((name) => keysOf(name, '')).sort();
+  assert.deepEqual(limiter.keys().sort(), realKeys);
   const refused = limiter.begin('stranger', '203.0.113.9', { knownAccount: false });
   assert.equal(refused.ok, false);
   assert.ok(refused.retryAfterSec > 0 && refused.retryAfterSec <= WINDOW / 1000);
   assert.equal(limiter.check('a5', '').ok, false);
   limiter.fail('a5', '', { knownAccount: true });
-  assert.deepEqual(limiter.keys().sort(), ['a1', 'a2', 'a3', 'a4'].map(accountKeyOf).sort(), 'no real account was dropped');
+  assert.deepEqual(limiter.keys().sort(), realKeys, 'no real account was dropped');
   assert.equal(limiter.begin('a1', '').ok, true, 'an account already in the table can still try');
   t += WINDOW;
   assert.equal(limiter.begin('stranger', '203.0.113.9', { knownAccount: false }).ok, true, 'room again once the window passed');
 });
 
-test('begin counts an attempt before the password check; succeed takes it back and clears the account', () => {
+test('begin counts an attempt before the password check; succeed takes it back and clears that address', () => {
   let t = 5_000_000;
-  const limiter = createLoginLimiter({ maxPerAccount: 2, maxPerIp: 3, now: () => t });
+  const limiter = createLoginLimiter({ maxPerPair: 2, maxPerAccount: 3, maxPerIp: 3, now: () => t });
   const first = limiter.begin('admin', '203.0.113.1');
-  const second = limiter.begin('admin', '203.0.113.2');
+  const second = limiter.begin('admin', '203.0.113.1');
   assert.equal(first.ok && second.ok, true);
-  const third = limiter.begin('admin', '203.0.113.3');
-  assert.equal(third.ok, false, 'two attempts still being checked already use the limit');
+  const third = limiter.begin('admin', '203.0.113.1');
+  assert.equal(third.ok, false, 'two attempts still being checked already use the limit for that address');
+  const elsewhere = limiter.begin('admin', '203.0.113.2');
+  assert.equal(elsewhere.ok, true, 'another address has its own count');
+  assert.equal(limiter.begin('admin', '203.0.113.3').ok, false, 'three attempts in all use the username limit');
   first.ticket.succeed();
   second.ticket.fail();
-  assert.equal(limiter.check('admin', '203.0.113.1').ok, true, 'a right password clears the account');
+  elsewhere.ticket.fail();
+  assert.equal(limiter.check('admin', '203.0.113.1').ok, true, 'a right password clears that address');
+  const fourth = limiter.begin('admin', '203.0.113.3');
+  assert.equal(fourth.ok, true, 'the right password took its own attempt back');
+  fourth.ticket.fail();
+  assert.equal(limiter.begin('admin', '203.0.113.4').ok, false, 'the username count keeps the other failures');
   // Per-IP: unsettled attempts count, successful ones do not.
   const ip = '198.51.100.5';
   limiter.begin('u1', ip).ticket.fail();
@@ -184,7 +226,7 @@ test('very long usernames are kept as short hashes, so limiter memory stays smal
     verdict.ticket.fail();
   }
   const keys = limiter.keys();
-  assert.equal(keys.length, 58, '50 usernames and 8 addresses');
+  assert.equal(keys.length, 108, '50 usernames, each also with its address, and 8 addresses');
   for (const key of keys) assert.ok(key.length <= 40, `a key of ${key.length} characters`);
   if (gc) {
     const grown = heapUsed() - before;
@@ -192,7 +234,7 @@ test('very long usernames are kept as short hashes, so limiter memory stays smal
   }
   // Only the first 1024 characters count, so names that differ later share one key (and one limit).
   for (let i = 0; i < 2; i += 1) limiter.begin(`z-${'u'.repeat(2000)}${i}`, '', { knownAccount: false }).ticket.fail();
-  assert.equal(limiter.keys().length, 59);
+  assert.equal(limiter.keys().length, 110);
   // The same username, in other case or with spaces at the ends, is the same key.
   const t = limiter.begin('  Owner ', '', { knownAccount: true });
   t.ticket.fail();

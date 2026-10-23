@@ -194,7 +194,7 @@ test('failed logins are limited per account and per IP', async () => {
   process.env.CMS_ADMIN_PASSWORD = 'limiter-test-password';
   const root = tempRoot();
   try {
-    // Default limits: the 11th try on one account in 15 minutes is refused.
+    // Default limits: the 11th try on one account from one address in 15 minutes is refused.
     await withCms({ dataPath: root }, async (base) => {
       for (let i = 0; i < 10; i += 1) assert.equal((await login(base, 'nobody', `guess-${i}`)).status, 401);
       const blocked = await login(base, 'nobody', 'guess-10');
@@ -219,8 +219,8 @@ test('failed logins are limited per account and per IP', async () => {
       assert.equal((await login(base, 'user-99', 'x', { 'X-Forwarded-For': '203.0.113.10' })).status, 401);
     });
 
-    // A successful login clears the account's failures.
-    await withCms({ dataPath: root, loginLimiter: createLoginLimiter({ maxPerAccount: 3, maxPerIp: 50 }) }, async (base) => {
+    // A successful login clears the account's failures from that address.
+    await withCms({ dataPath: root, loginLimiter: createLoginLimiter({ maxPerPair: 3, maxPerIp: 50 }) }, async (base) => {
       for (let i = 0; i < 2; i += 1) assert.equal((await login(base, 'admin', `wrong-${i}`)).status, 401);
       assert.equal((await login(base, 'admin', 'limiter-test-password')).status, 200);
       for (let i = 0; i < 2; i += 1) assert.equal((await login(base, 'admin', `wrong-again-${i}`)).status, 401);
