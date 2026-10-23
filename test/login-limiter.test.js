@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import bcrypt from 'bcryptjs';
 import { TEST_ADMIN_PASSWORD } from './_admin.js';
-import { bearer, bootCms, postJson, waitFor } from './_cms-boot.js';
-import { clientIp, createLoginLimiter, isProxyAddress, readLoginBody, trustedProxyHops } from '../server/login-limiter.js';
+import { bearer, bootCms, fakeHub, postJson, waitFor } from './_cms-boot.js';
+import { clientAddressMode, clientIp, createLoginLimiter, isProxyAddress, readLoginBody, trustedProxyHops } from '../server/login-limiter.js';
 
 test('limiter: a username locks per address first, then everywhere at the higher ceiling', () => {
   let clock = 0;
@@ -158,6 +159,172 @@ test('HTTP: /auth/login (staff) is limited too, and a success resets the count',
     assert.equal((await postJson(`${cms.base}/auth/login`, { username: 'emp', password: 'emp-pass-1' })).status, 429);
   } finally {
     await cms.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('limiter: begin counts the attempt before the password check, so unsettled attempts still use the limit', () => {
+  const limiter = createLoginLimiter({ maxInFlight: 1000, now: () => 0 });
+  const verdicts = Array.from({ length: 50 }, () => limiter.begin('admin', '198.51.100.30'));
+  const tickets = verdicts.filter((v) => v.ok).map((v) => v.ticket);
+  assert.equal(tickets.length, 10, 'ten attempts start while none has finished; the rest are refused');
+  assert.ok(verdicts.filter((v) => !v.ok).every((v) => v.retryAfterSec > 0 && !v.busy));
+  for (const ticket of tickets) ticket.fail();
+  assert.equal(limiter.check('admin', '198.51.100.30').ok, false, 'failed attempts stay counted');
+  assert.equal(limiter.running(), 0, 'settled checks are no longer running');
+});
+
+test('limiter: at most maxInFlight checks run at once per username and per address', () => {
+  const limiter = createLoginLimiter({ maxInFlight: 2, now: () => 0 });
+  const a = limiter.begin('admin', '198.51.100.1');
+  const b = limiter.begin('admin', '198.51.100.2');
+  const c = limiter.begin('admin', '198.51.100.3');
+  assert.equal(a.ok && b.ok, true);
+  assert.deepEqual(c, { ok: false, retryAfterSec: 1, busy: true }, 'a third check for one username waits, from any address');
+  a.ticket.fail();
+  assert.equal(limiter.begin('admin', '198.51.100.3').ok, true, 'a finished check frees a place');
+
+  const d = limiter.begin('x1', '203.0.113.50');
+  const e = limiter.begin('x2', '203.0.113.50');
+  assert.equal(d.ok && e.ok, true);
+  assert.equal(limiter.begin('x3', '203.0.113.50').busy, true, 'a third check from one address waits, for any username');
+  e.ticket.succeed();
+  e.ticket.fail();
+  e.ticket.succeed();
+  assert.equal(limiter.begin('x3', '203.0.113.50').ok, true, 'settling twice frees one place only once');
+  assert.equal(limiter.begin('x4', '203.0.113.50').busy, true);
+});
+
+test('limiter: a correct password takes its attempt back from every count', () => {
+  const limiter = createLoginLimiter({ maxPerPair: 3, maxPerAccount: 4, maxPerIp: 3, now: () => 0 });
+  for (let i = 0; i < 10; i += 1) {
+    const verdict = limiter.begin('owner', '198.51.100.40');
+    assert.equal(verdict.ok, true, `sign-in ${i + 1}`);
+    verdict.ticket.succeed();
+  }
+  assert.deepEqual(limiter.keys(), [], 'successful sign-ins leave no counts behind');
+  const wrong = limiter.begin('owner', '198.51.100.40');
+  wrong.ticket.fail();
+  wrong.ticket.succeed();
+  assert.equal(limiter.keys().length, 3, 'a ticket settles once; a late succeed does not undo a failure');
+});
+
+test('client address mode: reported without the address', () => {
+  const req = (remoteAddress, xff) => ({ socket: { remoteAddress }, headers: xff === undefined ? {} : { 'x-forwarded-for': xff } });
+  assert.deepEqual(clientAddressMode(req('203.0.113.5')), { mode: 'direct', forwardedFor: false });
+  assert.deepEqual(clientAddressMode(req('203.0.113.5', '198.51.100.1')), { mode: 'direct', forwardedFor: true }, 'a proxy on a public address');
+  assert.deepEqual(clientAddressMode(req('127.0.0.1', 'a, 198.51.100.1')), { mode: 'forwarded', forwardedFor: true });
+  assert.deepEqual(clientAddressMode(req('127.0.0.1')), { mode: 'shared-proxy', forwardedFor: false }, 'a local proxy with no header');
+  assert.deepEqual(clientAddressMode(req('127.0.0.1', '198.51.100.1'), { hops: 0 }), { mode: 'shared-proxy', forwardedFor: true });
+});
+
+/** Counts password checks and how many run at once. Wrong passwords answer after `delayMs`, like a slow hash. */
+function watchPasswordChecks({ delayMs = 30 } = {}) {
+  const original = bcrypt.compare;
+  const stats = { calls: 0, running: 0, maxRunning: 0 };
+  bcrypt.compare = async (plain, hash) => {
+    stats.calls += 1;
+    stats.running += 1;
+    stats.maxRunning = Math.max(stats.maxRunning, stats.running);
+    try {
+      if (plain === TEST_ADMIN_PASSWORD) return await original(plain, hash);
+      await new Promise((r) => setTimeout(r, delayMs));
+      return false;
+    } finally {
+      stats.running -= 1;
+    }
+  };
+  return { stats, restore: () => { bcrypt.compare = original; } };
+}
+
+const statusCounts = (results) => results.reduce((acc, r) => ({ ...acc, [r.status]: (acc[r.status] || 0) + 1 }), {});
+
+test('HTTP: parallel wrong passwords from one address get at most ten checks, and the owner elsewhere still signs in', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'asoldi-limit-'));
+  const cms = await bootCms({ dataPath: root });
+  let watch = null;
+  try {
+    await waitFor(async () => (await postJson(`${cms.base}/admin/login`, { username: 'admin', password: TEST_ADMIN_PASSWORD })).status === 200);
+    watch = watchPasswordChecks();
+    const from = { 'x-forwarded-for': 'client-written, 198.51.100.20' };
+    const wrong = (i) => postJson(`${cms.base}/admin/login`, { username: 'admin', password: `wrong-${i}` }, from);
+    const burst = statusCounts(await Promise.all(Array.from({ length: 50 }, (_, i) => wrong(i))));
+    assert.ok((burst[401] || 0) >= 1 && (burst[401] || 0) <= 10, `burst: ${JSON.stringify(burst)}`);
+    assert.equal((burst[401] || 0) + (burst[429] || 0), 50, 'every other request is refused with 429');
+    let failed = burst[401] || 0;
+    for (let wave = 0; wave < 5; wave += 1) {
+      const counts = statusCounts(await Promise.all(Array.from({ length: 10 }, (_, i) => wrong(100 + wave * 10 + i))));
+      failed += counts[401] || 0;
+    }
+    for (let i = 0; i < 20 && failed < 10; i += 1) if ((await wrong(500 + i)).status === 401) failed += 1;
+    assert.equal(failed, 10, 'exactly ten wrong passwords were checked for this username and address');
+    assert.equal(watch.stats.calls, 10, 'one password check per counted attempt');
+    assert.ok(watch.stats.maxRunning <= 2, `at most two checks at once (saw ${watch.stats.maxRunning})`);
+    assert.equal((await wrong(999)).status, 429);
+
+    const owner = await postJson(`${cms.base}/admin/login`, { username: 'admin', password: TEST_ADMIN_PASSWORD }, { 'x-forwarded-for': '198.51.100.21' });
+    assert.equal(owner.status, 200, 'the owner on a clean address signs in');
+  } finally {
+    watch?.restore();
+    await cms.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('HTTP: parallel wrong passwords from rotating addresses get at most 100 checks for one username', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'asoldi-limit-'));
+  const cms = await bootCms({ dataPath: root });
+  let watch = null;
+  try {
+    await waitFor(async () => (await postJson(`${cms.base}/admin/login`, { username: 'admin', password: TEST_ADMIN_PASSWORD })).status === 200);
+    watch = watchPasswordChecks({ delayMs: 10 });
+    let n = 0;
+    const wrong = () => {
+      n += 1;
+      const hop = `198.${18 + (n >> 16)}.${(n >> 8) & 255}.${n & 255}`;
+      return postJson(`${cms.base}/admin/login`, { username: 'admin', password: `wrong-${n}` }, { 'x-forwarded-for': `10.0.0.1, ${hop}` });
+    };
+    let failed = 0;
+    let refused = 0;
+    for (let wave = 0; wave < 3; wave += 1) {
+      const counts = statusCounts(await Promise.all(Array.from({ length: 80 }, wrong)));
+      failed += counts[401] || 0;
+      refused += counts[429] || 0;
+    }
+    assert.equal(failed + refused, 240);
+    for (let i = 0; i < 150 && failed < 100; i += 1) if ((await wrong()).status === 401) failed += 1;
+    assert.equal(failed, 100, 'the username ceiling holds');
+    const after = statusCounts(await Promise.all(Array.from({ length: 60 }, wrong)));
+    assert.deepEqual(after, { 429: 60 }, 'nothing more is checked once the ceiling is reached');
+    assert.equal(watch.stats.calls, 100, 'at most 100 password checks for one username in the window');
+    assert.ok(watch.stats.maxRunning <= 2, `at most two checks at once (saw ${watch.stats.maxRunning})`);
+  } finally {
+    watch?.restore();
+    await cms.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('HTTP: the heartbeat reports how sign-ins reach the CMS, never an address', async () => {
+  const hub = await fakeHub({ siteKey: 'limit-site' });
+  const root = mkdtempSync(path.join(tmpdir(), 'asoldi-limit-'));
+  const cms = await bootCms({ dataPath: root, hubUrl: hub.url, siteKey: 'limit-site' });
+  try {
+    await fetch(`${cms.base}/config`);
+    const first = await waitFor(() => hub.state.heartbeats[0]);
+    assert.equal(first.loginAddressMode, 'shared-proxy', 'a loopback request with no header');
+    assert.equal(first.loginForwardedFor, false);
+    assert.equal(first.loginAddressFrom, 'request');
+    await postJson(`${cms.base}/admin/login`, { username: 'admin', password: 'wrong-once' }, { 'x-forwarded-for': '198.51.100.60' });
+    await fetch(`${cms.base}/config`);
+    const second = await waitFor(() => hub.state.heartbeats[1]);
+    assert.equal(second.loginAddressMode, 'forwarded');
+    assert.equal(second.loginForwardedFor, true);
+    assert.equal(second.loginAddressFrom, 'sign-in');
+    assert.ok(!JSON.stringify(hub.state.heartbeats).includes('198.51.100.60'), 'no address leaves the site');
+  } finally {
+    await cms.close();
+    await hub.close();
     rmSync(root, { recursive: true, force: true });
   }
 });

@@ -39,7 +39,7 @@ import { contentCoverage, resolvePublicHtml } from './html-tracker.js';
 import { cmsCapabilities } from './capabilities.js';
 import { clearInitialAdminFile, initialAdminCredentials, readInitialAdminFile, resolveCmsSecrets, writeInitialAdminFile, DEFAULT_ADMIN_PASSWORDS } from './secret.js';
 import { createTokenSigner, LOCAL_TOKEN_MS, LOGIN_TOKEN_MS } from './admin-token.js';
-import { createLoginLimiter, clientIp, guardLogin, readLoginBody } from './login-limiter.js';
+import { createLoginLimiter, clientAddressMode, clientIp, guardLogin, readLoginBody } from './login-limiter.js';
 import { publicConfig, readPackageBuild } from './public-config.js';
 import { applyFieldMap, errorMessageFor, formsRuntimeScript, looksLikeBot, publicSubmission, safeReturnPath, successMessageFor, wantsJson, } from './forms.js';
 export { resolveCmsDataPath } from './data-path.js';
@@ -105,6 +105,16 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
     const adminSecret = secrets.adminSecret;
     const tokens = createTokenSigner(adminSecret);
     const loginLimiter = createLoginLimiter();
+    /** How the last sign-in reached the CMS (the mode only, never an address), for the heartbeat. */
+    let lastSignInAddress = null;
+    let warnedPublicProxy = false;
+    function noteSignInAddress(req) {
+        lastSignInAddress = clientAddressMode(req);
+        if (lastSignInAddress.mode === 'direct' && lastSignInAddress.forwardedFor && !warnedPublicProxy) {
+            warnedPublicProxy = true;
+            console.warn('[cms] Sign-ins arrive with X-Forwarded-For from an address that is not local, so the sign-in limits count everyone behind that proxy as one address. See docs/security.md.');
+        }
+    }
     const resolvedPublicPath = publicPath || join(process.cwd(), 'public');
     const router = express.Router();
     const store = createStore(resolvedDataPath);
@@ -378,6 +388,11 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
             body: JSON.stringify({ site_key: siteKey, events }),
         }).catch(() => { });
     }
+    /** Which address the sign-in limits use (`direct`, `forwarded`, `shared-proxy`), from the last sign-in or else this request. No address is sent. */
+    function loginAddressReport(req) {
+        const seen = lastSignInAddress || clientAddressMode(req);
+        return { loginAddressMode: seen.mode, loginForwardedFor: seen.forwardedFor, loginAddressFrom: lastSignInAddress ? 'sign-in' : 'request' };
+    }
     function sendHeartbeat(req, config) {
         if (!siteKey || !hubUrl)
             return;
@@ -400,6 +415,7 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
                 name: config?.name || '',
                 adminApplied: config?.adminSynced === true,
                 initialAdminPending: Boolean(readInitialAdminFile(resolvedDataPath)),
+                ...loginAddressReport(req),
             }),
         }).catch(() => { });
     }
@@ -462,29 +478,40 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
             res.status(400).json({ message: error });
             return;
         }
-        const ip = clientIp(req);
-        if (!guardLogin(loginLimiter, req, res, username, ip))
+        noteSignInAddress(req);
+        // The attempt is counted here, before any await, so parallel requests cannot pass the limits together.
+        const attempt = guardLogin(loginLimiter, req, res, username, clientIp(req));
+        if (!attempt)
             return;
-        // A sign-in right after start waits for first-start admin setup instead of failing.
-        await ensureAdmin();
-        const valid = await store.verifyAdmin(username, password);
-        if (valid) {
-            loginLimiter.succeed(username, ip);
-            const token = signToken({ role: 'admin', username, rank: 'admin', at: Date.now() });
-            res.json({ token, rank: 'admin', username, name: username });
-            return;
+        try {
+            // A sign-in right after start waits for first-start admin setup instead of failing.
+            await ensureAdmin();
+            const valid = await store.verifyAdmin(username, password);
+            if (valid) {
+                attempt.succeed();
+                const token = signToken({ role: 'admin', username, rank: 'admin', at: Date.now() });
+                res.json({ token, rank: 'admin', username, name: username });
+                return;
+            }
+            const staff = await store.verifyEmployee(username, password);
+            if (!staff.ok || !staff.user) {
+                attempt.fail();
+                res.status(401).json({ message: 'Invalid credentials' });
+                return;
+            }
+            attempt.succeed();
+            const rank = normalizeRank(staff.user.rank);
+            const token = signToken({ role: 'staff', userId: staff.user.id, username: staff.user.username, rank, at: Date.now() });
+            res.json({ token, rank, username: staff.user.username, name: staff.user.name || staff.user.username });
         }
-        const staff = await store.verifyEmployee(username, password);
-        if (!staff.ok || !staff.user) {
-            loginLimiter.fail(username, ip);
-            res.status(401).json({ message: 'Invalid credentials' });
-            return;
+        catch (error) {
+            console.error('[cms] Admin sign-in failed:', error?.message || error);
+            if (!res.headersSent)
+                res.status(500).json({ message: 'Sign-in failed' });
         }
-        loginLimiter.succeed(username, ip);
-        const rank = normalizeRank(staff.user.rank);
-        const token = signToken({ role: 'staff', userId: staff.user.id, username: staff.user.username, rank, at: Date.now() });
-        res.json({ token, rank, username: staff.user.username, name: staff.user.name || staff.user.username });
-        return;
+        finally {
+            attempt.fail();
+        }
     });
     router.get('/admin/me', anyAuth, (req, res) => {
         res.json({
@@ -571,18 +598,29 @@ export default function createCmsRoutes({ hubUrl, siteKey, dataPath, siteSeed: s
             res.status(400).json({ message: error });
             return;
         }
-        const ip = clientIp(req);
-        if (!guardLogin(loginLimiter, req, res, username, ip))
+        noteSignInAddress(req);
+        const attempt = guardLogin(loginLimiter, req, res, username, clientIp(req));
+        if (!attempt)
             return;
-        const result = await store.verifyEmployee(username, password);
-        if (!result.ok || !result.user) {
-            loginLimiter.fail(username, ip);
-            res.status(401).json({ message: 'Invalid username or password' });
-            return;
+        try {
+            const result = await store.verifyEmployee(username, password);
+            if (!result.ok || !result.user) {
+                attempt.fail();
+                res.status(401).json({ message: 'Invalid username or password' });
+                return;
+            }
+            attempt.succeed();
+            const token = signToken({ role: 'employee', userId: result.user.id, at: Date.now() });
+            res.json({ token, user: result.user });
         }
-        loginLimiter.succeed(username, ip);
-        const token = signToken({ role: 'employee', userId: result.user.id, at: Date.now() });
-        res.json({ token, user: result.user });
+        catch (error) {
+            console.error('[cms] Staff sign-in failed:', error?.message || error);
+            if (!res.headersSent)
+                res.status(500).json({ message: 'Sign-in failed' });
+        }
+        finally {
+            attempt.fail();
+        }
     });
     /** The alt-text index is private. Other files under uploads/ are public. */
     router.get('/uploads/media-index.json', (_req, res) => res.status(404).end());

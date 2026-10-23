@@ -200,7 +200,7 @@ That endpoint returns **404** when ecommerce is off. Product data stays on the c
 }
 ```
 
-On each config load the CMS POSTs `{CMS_HUB_URL}/api/hub/heartbeat` with `site_key`, `packageVersion`, and `adminUrl` so the hub can show last-seen version for fleet updates.
+On each config load the CMS POSTs `{CMS_HUB_URL}/api/hub/heartbeat` with `site_key`, `packageVersion`, `packageBuild`, and `adminUrl` so the hub can show last-seen version for fleet updates. It also sends `adminApplied`, `initialAdminPending` and the sign-in address mode (`loginAddressMode`, `loginForwardedFor`, `loginAddressFrom`; see [docs/security.md](docs/security.md)).
 
 ---
 
