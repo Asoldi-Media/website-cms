@@ -33,12 +33,13 @@ import {
 } from './forms.js';
 import { resolveCmsSecrets } from './secret.js';
 import {
-  KNOWN_DEFAULT_PASSWORDS,
+  SHIPPED_DEFAULT_PASSWORDS,
   clientIpFromRequest,
   createLoginLimiter,
   createTokenSigner,
   guardLogin,
   isUsableEnvPassword,
+  newPasswordProblem,
   publicConfig,
   randomAdminPassword,
   writeInitialAdmin,
@@ -206,7 +207,7 @@ export default function createCmsRoutes({
   }
 
   async function hasDefaultPassword(admin) {
-    for (const candidate of KNOWN_DEFAULT_PASSWORDS) {
+    for (const candidate of SHIPPED_DEFAULT_PASSWORDS) {
       if (await store.verifyPassword(candidate, admin.passwordHash)) return true;
     }
     return false;
@@ -215,7 +216,7 @@ export default function createCmsRoutes({
   // There is never a built-in admin password. The first admin gets the env
   // password (if strong) or a random one in <data>/cms/private/initial-admin.json;
   // the hub's pendingAdmin then sets the client's real password. An admin still
-  // on a known default password gets a random one the same way.
+  // on a default password that a release shipped gets a random one the same way.
   async function ensureAdmin() {
     const admin = await store.getAdmin();
     const envPassword = process.env.CMS_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || '';
@@ -320,6 +321,13 @@ export default function createCmsRoutes({
     console.error('[cms] Admin setup failed:', error?.message || error);
   });
 
+  function refuseWeakPassword(res, password) {
+    const problem = newPasswordProblem(password);
+    if (!problem) return false;
+    res.status(400).json({ message: problem });
+    return true;
+  }
+
   router.get('/config', async (req, res) => {
     const config = await fetchHubConfig();
     sendHeartbeat(req, config);
@@ -382,6 +390,7 @@ export default function createCmsRoutes({
     if (!username || !password) {
       return res.status(400).json({ message: 'Username and password required' });
     }
+    if (refuseWeakPassword(res, password)) return;
     const result = await store.createUser(username, password, { rank, name, email, avatarUrl });
     if (!result.ok) {
       return res.status(400).json({ message: result.error });
@@ -390,6 +399,8 @@ export default function createCmsRoutes({
   });
 
   router.put('/admin/users/:id', adminAuth, async (req, res) => {
+    const password = req.body?.password;
+    if (password !== undefined && password !== null && password !== '' && refuseWeakPassword(res, password)) return;
     const result = await store.updateUser(req.params.id, req.body || {});
     if (!result.ok) return res.status(400).json({ message: result.error });
     res.json(result.user || { ok: true });
@@ -409,6 +420,7 @@ export default function createCmsRoutes({
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ message: 'Current and new password required' });
     }
+    if (refuseWeakPassword(res, newPassword)) return;
     if (!guardLogin(loginLimiter, req, res, req.actor.username)) return;
     const wrongCurrent = () => {
       loginLimiter.fail(req.actor.username, clientIpFromRequest(req));

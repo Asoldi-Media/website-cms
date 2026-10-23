@@ -99,6 +99,7 @@ Optional (first-run admin account and token signing):
 - **CMS_ADMIN_USERNAME** / **CMS_ADMIN_PASSWORD** – First admin for this client’s CMS (username defaults to `admin`). The password must be 8+ characters and not a common placeholder. Without it, a random password is written to `<data>/cms/private/initial-admin.json` (mode 0600). The client admin password set in the hub replaces it on the first config load.
 - **CMS_ADMIN_SECRET** – Optional token-signing secret (16+ characters). Without it, a random secret is generated once in `<data>/cms/private/secrets.json` (mode 0600) and reused across deploys.
 - Admin tokens expire after 7 days, and repeated failed sign-ins are rate limited per account and per IP.
+- New passwords (change password, staff users) must be 8+ characters and not a common default such as `changeme` or `password`. At start, an admin still on a default password that an earlier release shipped (`changeme`, `change-me`) gets a random one in `initial-admin.json`.
 - **CMS_PUBLIC_URL** – Public site origin used in hub heartbeats (e.g. `https://mongsushi.no`). If unset, the CMS infers it from the incoming request host.
 
 ---

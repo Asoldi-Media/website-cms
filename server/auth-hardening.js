@@ -6,6 +6,7 @@
  * - Public config: only an explicit list of keys reaches GET /api/cms/config.
  * - First admin: never a built-in password; a random one is written to
  *   <data>/cms/private/initial-admin.json until the hub sets the real one.
+ * - New passwords: 8+ characters and not a known default.
  */
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { join } from 'path';
@@ -149,13 +150,31 @@ export function publicConfig(config) {
   return out;
 }
 
-/** Passwords that earlier releases or common setups used as defaults. */
+/** Passwords that earlier releases or common setups used as defaults. New passwords may not be one of them. */
 export const KNOWN_DEFAULT_PASSWORDS = Object.freeze(['changeme', 'change-me', 'admin', 'password']);
 
+/**
+ * Default admin passwords that earlier releases actually shipped. An admin still on one of these gets
+ * a random password at start. Other weak passwords are refused when set, but never replaced at start,
+ * so a password the client chose before this release keeps working.
+ */
+export const SHIPPED_DEFAULT_PASSWORDS = Object.freeze(['changeme', 'change-me']);
+
+export const MIN_PASSWORD_LENGTH = 8;
+
+/** Why a new password is refused (a message for the admin UI, in Norwegian), or null when it is fine. */
+export function newPasswordProblem(value) {
+  if (typeof value !== 'string' || value.length < MIN_PASSWORD_LENGTH) {
+    return `Passordet må ha minst ${MIN_PASSWORD_LENGTH} tegn.`;
+  }
+  if (KNOWN_DEFAULT_PASSWORDS.includes(value.trim().toLowerCase())) {
+    return 'Dette passordet er for enkelt å gjette. Velg et annet passord.';
+  }
+  return null;
+}
+
 export function isUsableEnvPassword(value) {
-  const text = String(value ?? '');
-  if (text.length < 8) return false;
-  return !KNOWN_DEFAULT_PASSWORDS.includes(text.trim().toLowerCase());
+  return newPasswordProblem(String(value ?? '')) === null;
 }
 
 export function randomAdminPassword() {

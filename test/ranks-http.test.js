@@ -67,7 +67,7 @@ test('writer can publish blog posts but cannot manage products; employee cannot 
     const employeeRes = await fetch(`${base}/admin/users`, {
       method: 'POST',
       headers: { ...admin, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'emp1', password: 'emppass', rank: 'employee' }),
+      body: JSON.stringify({ username: 'emp1', password: 'emp-pass-1', rank: 'employee' }),
     });
     const employee = await employeeRes.json();
 
@@ -94,7 +94,7 @@ test('writer can publish blog posts but cannot manage products; employee cannot 
     assert.equal(publicPosts.length, 1);
     assert.equal(publicPosts[0].authorName, 'writer1');
 
-    const emp = await login(base, 'emp1', 'emppass');
+    const emp = await login(base, 'emp1', 'emp-pass-1');
     const del = await fetch(`${base}/admin/users/${employee.id}`, { method: 'DELETE', headers: emp });
     assert.equal(del.status, 403);
     const adminDel = await fetch(`${base}/admin/users/${employee.id}`, { method: 'DELETE', headers: admin });
