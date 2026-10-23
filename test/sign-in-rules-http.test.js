@@ -57,7 +57,7 @@ async function send(base, method, route, token, payload) {
   return { status: res.status, body: await res.json().catch(() => ({})) };
 }
 
-const WEAK_MESSAGE = /^(Passordet må ha minst 8 tegn\.|Dette passordet er for enkelt å gjette\. Velg et annet passord\.)$/;
+const WEAK_MESSAGE = /^(Passordet må ha minst 8 tegn\.|Passordet kan ha høyst 1024 tegn\.|Dette passordet er for enkelt å gjette\. Velg et annet passord\.)$/;
 
 test('new passwords need 8+ characters and may not be a known default (change-password)', async () => {
   clearAuthEnv();
@@ -66,7 +66,7 @@ test('new passwords need 8+ characters and may not be a known default (change-pa
   try {
     await withCms({ dataPath: root }, async (base) => {
       const admin = (await login(base, 'admin', 'policy-test-password')).body.token;
-      for (const weak of ['password', 'changeme', 'change-me', 'Password', ' changeme ', 'admin', 'kort']) {
+      for (const weak of ['password', 'changeme', 'change-me', 'Password', ' changeme ', 'admin', 'kort', '        ', '       x', 'p'.repeat(1025)]) {
         const res = await send(base, 'POST', '/admin/change-password', admin, { currentPassword: 'policy-test-password', newPassword: weak });
         assert.equal(res.status, 400, weak);
         assert.match(res.body.message, WEAK_MESSAGE, weak);
@@ -89,8 +89,8 @@ test('new passwords need 8+ characters and may not be a known default (create an
   try {
     await withCms({ dataPath: root }, async (base) => {
       const admin = (await login(base, 'admin', 'policy-test-password')).body.token;
-      for (const weak of ['password', 'changeme', 'emppass']) {
-        const res = await send(base, 'POST', '/admin/users', admin, { username: `staff-${weak}`, password: weak, rank: 'employee' });
+      for (const weak of ['password', 'changeme', 'emppass', '        ']) {
+        const res = await send(base, 'POST', '/admin/users', admin, { username: `staff-${weak.trim() || 'blank'}`, password: weak, rank: 'employee' });
         assert.equal(res.status, 400, weak);
         assert.match(res.body.message, WEAK_MESSAGE, weak);
       }
@@ -99,7 +99,7 @@ test('new passwords need 8+ characters and may not be a known default (create an
       const created = await send(base, 'POST', '/admin/users', admin, { username: 'staff-1', password: 'staff-own-password', rank: 'employee' });
       assert.equal(created.status, 201);
       const id = created.body.id;
-      for (const weak of ['password', 'short', 12345678]) {
+      for (const weak of ['password', 'short', 12345678, '         ']) {
         const res = await send(base, 'PUT', `/admin/users/${id}`, admin, { password: weak });
         assert.equal(res.status, 400, String(weak));
         assert.match(res.body.message, WEAK_MESSAGE, String(weak));

@@ -7,7 +7,7 @@
  * - Public config: only an explicit list of keys reaches GET /api/cms/config.
  * - First admin: never a built-in password; a random one is written to
  *   <data>/cms/private/initial-admin.json until the hub sets the real one.
- * - New passwords: 8+ characters and not a known default.
+ * - New passwords: 8 to 1024 characters (not counting spaces at the ends) and not a known default.
  */
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { join } from 'path';
@@ -56,6 +56,7 @@ export function createTokenSigner(secret, { ttlMs = TOKEN_TTL_MS, now = () => Da
   };
 }
 
+export const MAX_PASSWORD_LENGTH = 1024;
 const MAX_ADDRESS_LENGTH = 64;
 
 function normalizeAddress(value) {
@@ -298,10 +299,16 @@ export const SHIPPED_DEFAULT_PASSWORDS = Object.freeze(['changeme', 'change-me']
 
 export const MIN_PASSWORD_LENGTH = 8;
 
-/** Why a new password is refused (a message for the admin UI, in Norwegian), or null when it is fine. */
+/**
+ * Why a new password is refused (a message for the admin UI, in Norwegian), or null when it is fine.
+ * Spaces at the ends do not count towards the minimum. The maximum is the longest password sign-in accepts.
+ */
 export function newPasswordProblem(value) {
-  if (typeof value !== 'string' || value.length < MIN_PASSWORD_LENGTH) {
+  if (typeof value !== 'string' || value.trim().length < MIN_PASSWORD_LENGTH) {
     return `Passordet må ha minst ${MIN_PASSWORD_LENGTH} tegn.`;
+  }
+  if (value.length > MAX_PASSWORD_LENGTH) {
+    return `Passordet kan ha høyst ${MAX_PASSWORD_LENGTH} tegn.`;
   }
   if (KNOWN_DEFAULT_PASSWORDS.includes(value.trim().toLowerCase())) {
     return 'Dette passordet er for enkelt å gjette. Velg et annet passord.';
